@@ -179,3 +179,6 @@ main { max-width: 1136px; margin: 0 auto; }
   .resource-control .stepper .resource-value input { field-sizing: content; width: auto; min-width: 1ch; }
 }
 #newView .option-content > span.option-foot { line-height: normal; }
+
+.resource-value { max-width: calc(100% - 96px); }
+.resource-value input { flex-shrink: 1; min-width: 0; }

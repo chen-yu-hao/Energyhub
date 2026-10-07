@@ -138,7 +138,7 @@
     $('threadBudget').max = config.thread_pool_size || config.cpu_count || Number.MAX_SAFE_INTEGER;
     $('taskThreads').max = config.cpu_count || config.thread_pool_size || Number.MAX_SAFE_INTEGER;
     $('memoryPool').max = config.memory_pool_mb / 1024;
-    $('memoryPool').min = Math.min(1, config.memory_pool_mb / 1024);
+    $('memoryPool').min = 1 / 1024;
     $('globalPoolSummary').textContent = `Server pool: ${config.thread_pool_size ?? config.cpu_count ?? '—'} CPU threads · ${config.pool_size} concurrent slots · ${config.memory_pool_mb.toLocaleString()} MB. In use: ${config.slots_used} slots, ${config.memory_used_mb.toLocaleString()} MB.`;
     if (state.initial) {
       const threadLimit = config.thread_pool_size || config.cpu_count || 1;
@@ -412,7 +412,7 @@
   document.addEventListener('click', event => {
     const button = event.target.closest('button');
     if (!button) return;
-    if (button.dataset.step) { const [id, delta] = button.dataset.step.split(':'); const input = $(id); input.value = Math.min(Number(input.max) || Infinity, Math.max(Number(input.min) || 1, (Number(input.value) || 1) + Number(delta))); updateForm(); }
+    if (button.dataset.step) { const [id, delta] = button.dataset.step.split(':'); const input = $(id); const step = id === 'memoryPool' && Number(input.max) < 32 ? Math.sign(Number(delta)) * Math.max(1 / 1024, Number(input.max) / 8) : Number(delta); input.value = Math.min(Number(input.max) || Infinity, Math.max(Number(input.min) || 1, (Number(input.value) || 1) + step)); updateForm(); }
     if (button.dataset.remove) removeFile(button.dataset.remove);
     if (button.id === 'cancelTask') cancelTask(button);
     if (button.id === 'loadSample') loadSample(button);
