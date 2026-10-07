@@ -1,0 +1,8 @@
+include README.md pyproject.toml start-api.sh
+recursive-include static *
+recursive-include _bootstrap *.py
+recursive-include examples *
+recursive-include tests *.py
+global-exclude *.py[cod]
+global-exclude .DS_Store
+recursive-include docs *.png *.md

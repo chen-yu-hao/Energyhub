@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dfthub-energyhub"
+version = "0.2.0"
+description = "PySCF high-accuracy reference-energy calculator for DFThub"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["pyscf", "coupled-cluster", "quantum-chemistry", "reference-energy"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+
+[project.urls]
+Repository = "https://github.com/chen-yu-hao/Energyhub"
+Issues = "https://github.com/chen-yu-hao/Energyhub/issues"
+
+[project.optional-dependencies]
+api = ["Flask>=2.2"]
+compute = ["pyscf>=2.14"]
+all = ["Flask>=2.2", "pyscf>=2.14"]
+
+[project.scripts]
+energyhub-api = "Energyhub.app:main"
+energyhub = "Energyhub.cli:main"
+
+[tool.setuptools]
+packages = ["Energyhub"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+Energyhub = ["static/*", "static/**/*", "_bootstrap/Energyhub/*.py"]
+
+[tool.setuptools.package-dir]
+Energyhub = "."

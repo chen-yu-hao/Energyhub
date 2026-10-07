@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#eff4fc">
+  <meta name="description" content="Calculate high-accuracy coupled-cluster reference energies with Energyhub and PySCF.">
+  <title>CC energy · Energyhub</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%231d1d1f'/%3E%3Ctext x='16' y='24' text-anchor='middle' font-size='26' fill='white'%3E⚛%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/app.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <div class="shell">
+    <nav class="top-nav" aria-label="Main navigation">
+      <a class="brand" href="#new"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></span>CC energy <span class="brand-sub">by Energyhub</span></a>
+      <div class="nav-links"><a href="#new" data-nav="new" aria-current="page">Calculate</a><a href="#results" data-nav="results">Results</a><a href="#guide" data-nav="guide">Guide</a></div>
+      <button class="icon-button settings-button" type="button" aria-label="Resource pool settings" title="Resource pool settings" id="openSettings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor"/><circle cx="16" cy="17" r="3" fill="currentColor"/></svg></button>
+    </nav>
+    <main>
+      <header class="hero">
+        <div><div class="eyebrow">PRECISION, FROM FIRST PRINCIPLES</div><h1>High-accuracy energies</h1><p>Calculate molecular reference energies with coupled-cluster methods,<br class="desktop-break"> at a fixed basis or the complete-basis-set limit.</p></div>
+        <a class="button button-soft hero-link" href="#guide">How CC energy works <span aria-hidden="true">↗</span></a>
+      </header>
+      <div id="connectionNotice" class="notice error" role="alert" hidden></div>
+      <div class="workspace">
+        <aside class="sidebar" aria-label="Tasks">
+          <div class="sidebar-heading"><h2>Tasks</h2><span id="taskCount" class="muted">Loading…</span></div>
+          <label class="search-wrap"><span class="sr-only">Search tasks</span><svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input id="taskSearch" type="search" placeholder="Search tasks" autocomplete="off"></label>
+          <a href="#new" class="new-task-link selected" id="newTaskLink"><span class="plus" aria-hidden="true">+</span>New CC energy task</a>
+          <div id="taskList" class="task-list" aria-label="Task history"><p class="empty-sidebar">Connecting to your workspace…</p></div>
+          <div class="sidebar-footer"><span class="status-dot" id="engineDot"></span><span id="engineLabel">Connecting to PySCF…</span></div>
+        </aside>
+        <div class="content" id="content" tabindex="-1">
+          <section class="panel" id="newView" aria-labelledby="newTask">
+            <div class="panel-heading"><div><h2 id="newTask">New CC energy task</h2><p>One workspace for your structures, progress and results.</p></div><span class="label-pill" id="fullLabel">CCSD(T) / cc-pVTZ</span></div>
+            <form id="taskForm">
+              <div class="name-field"><label for="taskName">Task name</label><input id="taskName" name="name" type="text" maxlength="120" placeholder="e.g. Water dimer benchmark" autocomplete="off"></div>
+              <fieldset class="step"><legend><span class="step-number">1</span>Method</legend>
+                <div class="method-grid option-grid" id="methodChoices">
+                  <label class="option-card"><input type="radio" name="method" value="CCSD"><span class="option-content"><span class="option-heading"><strong>CCSD</strong><small>O(N⁶)</small></span><span>Iterative singles<br>and doubles</span><span class="option-foot" data-method-status="CCSD">Checking availability</span></span></label>
+                  <label class="option-card"><input type="radio" name="method" value="CCSD(T)" checked><span class="option-content"><span class="option-heading"><strong>CCSD(T)</strong><small>O(N⁷)</small></span><span>Perturbative<br>triples correction</span><span class="option-foot" data-method-status="CCSD(T)">Checking availability</span></span></label>
+                  <label class="option-card"><input type="radio" name="method" value="CCSDT"><span class="option-content"><span class="option-heading"><strong>CCSDT</strong><small>O(N⁸)</small></span><span>Full iterative<br>triples</span><span class="option-foot" data-method-status="CCSDT">Checking availability</span></span></label>
+                  <label class="option-card"><input type="radio" name="method" value="CCSDT(Q)"><span class="option-content"><span class="option-heading"><strong>CCSDT(Q)</strong><small>O(N⁹)</small></span><span>Perturbative<br>quadruples correction</span><span class="option-foot" data-method-status="CCSDT(Q)">Checking availability</span></span></label>
+                </div>
+                <div class="inline-detail"><span class="field-label">Correlation</span><div class="segments" aria-label="Local correlation"><span class="segment selected">Canonical</span><button class="segment" type="button" disabled title="LNO is not implemented by this PySCF backend">LNO</button><button class="segment" type="button" disabled title="PNO is not implemented by this PySCF backend">PNO</button></div></div><p class="help">All electrons correlated · no frozen core. LNO and PNO are unavailable in this backend.</p>
+                <p id="methodNotice" class="notice info" hidden></p>
+              </fieldset>
+              <fieldset class="step"><legend><span class="step-number">2</span>Basis set</legend>
+                <div class="basis-grid option-grid">
+                  <label class="option-card basis-card"><input type="radio" name="basis" value="3zeta" checked><span class="option-content"><strong>3ζ</strong><span>Triple-zeta</span><span class="option-foot mono">cc-pVTZ</span></span></label>
+                  <label class="option-card basis-card"><input type="radio" name="basis" value="4zeta"><span class="option-content"><strong>4ζ</strong><span>Quadruple-zeta</span><span class="option-foot mono">cc-pVQZ</span></span></label>
+                  <label class="option-card basis-card"><input type="radio" name="basis" value="5zeta"><span class="option-content"><strong>5ζ</strong><span>Quintuple-zeta</span><span class="option-foot mono">cc-pV5Z</span></span></label>
+                  <label class="option-card basis-card"><input type="radio" name="basis" value="CBS"><span class="option-content"><strong>CBS</strong><span>Extrapolated limit</span><span class="option-foot mono" id="cbsPairLabel">3ζ → 4ζ</span></span></label>
+                </div>
+                <div class="inline-detail"><span class="field-label">Family</span><div class="segments"><label class="segment-choice"><input type="radio" name="basis_family" value="cc" checked><span class="mono">cc-pVnZ</span></label><label class="segment-choice"><input type="radio" name="basis_family" value="aug"><span class="mono">aug-cc-pVnZ</span></label></div></div><div class="inline-detail" id="cbsPairChoices" hidden><span class="field-label">Extrapolate</span><div class="segments"><label class="segment-choice"><input type="radio" name="cbs_pair" value="34" checked><span>3ζ → 4ζ</span></label><label class="segment-choice"><input type="radio" name="cbs_pair" value="45"><span>4ζ → 5ζ</span></label></div></div>
+                <div id="cbsInfo" class="formula-box" hidden><span class="mono">E<sub>corr</sub>(X) = E<sub>corr</sub><sup>CBS</sup> + A · X<sup>−3</sup></span><p><span id="cbsBasisDescription">Each structure is calculated at 3ζ and 4ζ.</span> The Hartree–Fock component is extrapolated separately with exp(−1.63X).</p></div>
+              </fieldset>
+              <fieldset class="step"><legend><span class="step-number">3</span>Structures &amp; reference</legend>
+                <div class="upload-grid">
+                  <div class="upload-wrap"><label class="drop-zone" for="archiveFile" data-upload="tgz"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m-5 5 5-5 5 5M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg><strong>Geometry archive</strong><span id="archiveFileLabel">Drop .tgz / .tar.gz or browse</span><input id="archiveFile" type="file" accept=".tgz,.tar.gz" aria-label="Geometry archive (.tgz or .tar.gz)"></label><button type="button" class="remove-file" data-remove="tgz" hidden>Remove archive</button></div>
+                  <div class="upload-wrap"><label class="drop-zone" for="referenceFile" data-upload="ref"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Zm0 0v6h6M8 13h8m-8 4h6"/></svg><strong>Reference template</strong><span id="referenceFileLabel">Drop .ref or browse</span><input id="referenceFile" type="file" accept=".ref" aria-label="Reference template (.ref)"></label><button type="button" class="remove-file" data-remove="ref" hidden>Remove reference</button></div>
+                </div>
+                <div class="sample-actions"><span class="muted">First calculation?</span><button class="text-button" id="loadSample" type="button">Use example files ↗</button></div><p class="help">DFThub .xyz files: charge and spin multiplicity on line 2. Reference rows may use <code>?</code> for unknown values; an empty .ref calculates every structure. <a href="#guide">Format guide ↗</a></p>
+              </fieldset>
+              <fieldset class="step"><legend class="parallel-legend"><span><span class="step-number">4</span>Parallel execution</span><label class="switch-label"><span id="parallelState">On</span><input id="parallelEnabled" type="checkbox" checked role="switch" aria-label="Parallel execution"><span class="switch-track" aria-hidden="true"></span></label></legend>
+                <p class="step-description">Structures share one thread pool and one memory pool. Each receives its own threads and an equal memory budget.</p>
+                <div class="resource-grid">
+                  <div class="resource-control"><label for="threadBudget">Thread pool size</label><div class="stepper"><button type="button" data-step="threadBudget:-1" aria-label="Fewer pool threads">−</button><input id="threadBudget" name="thread_budget" type="number" value="1" min="1" step="1" required><button type="button" data-step="threadBudget:1" aria-label="More pool threads">+</button></div><span class="input-unit">CPU threads total</span></div>
+                  <div class="resource-control"><label for="memoryPool">Task memory pool</label><div class="stepper"><button type="button" data-step="memoryPool:-512" aria-label="Less task memory">−</button><input id="memoryPool" name="memory_pool_mb" type="number" value="4096" min="1" step="1" required><button type="button" data-step="memoryPool:512" aria-label="More task memory">+</button></div><span class="input-unit">MB total</span></div>
+                  <div class="resource-control"><label for="taskThreads">Threads per structure</label><div class="stepper"><button type="button" data-step="taskThreads:-1" aria-label="Fewer threads per structure">−</button><input id="taskThreads" name="task_threads" type="number" value="1" min="1" step="1" required><button type="button" data-step="taskThreads:1" aria-label="More threads per structure">+</button></div><span class="input-unit">CPU threads</span></div>
+                </div>
+                <div class="allocation"><div id="allocationSummary" class="allocation-summary" aria-live="polite"></div><div id="allocationLanes" class="allocation-lanes" aria-hidden="true"></div></div>
+                <p class="help" id="globalPoolSummary">Loading server resource pools…</p>
+                <p class="help">Memory is a PySCF working-memory budget; allow headroom for native-library overhead.</p>
+              </fieldset>
+              <div class="notice error" id="formError" role="alert" hidden></div>
+              <footer class="form-footer"><span id="footerSummary" class="muted"></span><div class="button-row"><button id="savePreset" type="button" class="button button-soft">Save preset</button><button id="submitTask" class="button button-primary" type="submit" disabled>Run CC energy <span aria-hidden="true">→</span></button></div></footer>
+            </form>
+          </section>
+          <section class="panel" id="jobView" aria-labelledby="jobTitle" hidden><div id="jobContent"></div></section>
+          <section class="panel" id="resultsView" aria-labelledby="resultsTitle" hidden><div class="panel-heading"><div><h2 id="resultsTitle">Your results</h2><p>Completed calculations, ready to use in DFThub.</p></div><a class="button button-soft" href="#new">New task +</a></div><div id="resultsContent" class="results-content"></div></section>
+          <section class="panel guide" id="guideView" aria-labelledby="guideTitle" hidden>
+            <div class="panel-heading"><div><span class="eyebrow">A SMALL GUIDE TO PRECISE RESULTS</span><h2 id="guideTitle">From structures to reference energies.</h2><p>Prepare two files, choose your calculation, and download a complete .ref.</p></div></div>
+            <article><h3>01 · Prepare your input</h3><p>Try the bundled H₂ example: <a href="/static/examples/H2.tgz" download>download the geometry archive ↓</a> and <a href="/static/examples/H2.ref" download>reference template ↓</a>. You can also load these files directly in a new task.</p><p>Upload a <strong>.tgz or .tar.gz</strong> containing .xyz geometries and a <strong>.ref</strong> template. Geometry names must be unique across the archive; use filename stems in the reference.</p><pre><code># water.xyz
+3
+0 1
+O  0.000  0.000  0.000
+H  0.758  0.000  0.504
+H -0.758  0.000  0.504</code></pre><p>The first line is the atom count. The second is <code>charge multiplicity</code> (here neutral, singlet). Coordinates are in ångström.</p><pre><code># coefficient molecule [coefficient molecule ...] reference ratio
+-1 reactant 1 product ? 1
+1 water ? 1</code></pre><p>Use <code>?</code> for missing reference energies. A numeric reference is recomputed. A completely empty .ref produces one row per structure. With a trailing ratio, reference values are the weighted sum of molecular energies in kcal/mol; the ratio is preserved as DFThub metadata and does not divide the energy. Without a ratio, reference values remain in hartree.</p></article>
+            <article><h3>02 · Choose your theory</h3><p><strong>CCSD</strong> iterates singles and doubles; <strong>CCSD(T)</strong> adds perturbative triples. <strong>CCSDT</strong> iterates triples, and <strong>CCSDT(Q)</strong> adds the perturbative quadruples correction. All calculations use canonical coupled cluster and correlate all electrons.</p><p>Available methods are detected from the configured PySCF interpreter. In PySCF 2.14, CCSDT(Q) supports closed-shell structures; open-shell CCSDT(Q) is unavailable. The interface reports the installed environment’s actual support.</p><p><strong>3ζ</strong>, <strong>4ζ</strong>, and <strong>5ζ</strong> use cc-pVTZ, cc-pVQZ, and cc-pV5Z. Choose <strong>aug-cc-pVnZ</strong> to include diffuse functions. <strong>CBS</strong> computes the selected 3ζ/4ζ or 4ζ/5ζ pair and extrapolates correlation energy with X⁻³ and Hartree–Fock energy with exp(−1.63X). The calculation report retains both basis components. Unsupported elements fail explicitly.</p></article>
+            <article><h3>03 · Allocate resources</h3><p><strong>Thread pool size</strong> is the job’s CPU-thread budget. <strong>Threads per structure</strong> controls each PySCF calculation. Concurrency is floor(pool threads ÷ threads per structure); any remainder stays idle. With parallel execution off, one structure uses the whole thread pool.</p><p><strong>Task memory pool</strong> is divided by concurrent structures. Jobs share server-wide CPU thread, calculation slot, and memory pools, and wait when resources are occupied. Open resource settings in the navigation to change server limits when the queue is idle.</p></article>
+            <article><h3>04 · Follow your calculation</h3><p>Open a task to see measured progress, errors, resource allocation, and molecular energies. Progress counts completed structures, so a single expensive structure may remain at 0% for a while. The page can be closed and reopened while the server continues calculating.</p><p><strong>Stop task</strong> terminates the calculation and its workers. Download becomes available only when every required structure has converged and the complete .ref has been written. Reports include PySCF version, reference type, corrections and CBS components. Task history persists across server restarts; interrupted tasks are marked failed.</p></article>
+            <div class="guide-footer"><a href="#new" class="button button-primary">Create a task →</a><a href="/api/energyhub/methods" target="_blank" rel="noopener">Inspect installed capabilities ↗</a></div>
+          </section>
+        </div>
+      </div>
+      <footer class="page-footer"><span>Energyhub <span class="footer-dot">·</span> Coupled-cluster reference energies</span><span>Computed with PySCF</span></footer>
+    </main>
+  </div>
+  <dialog id="settingsDialog" aria-labelledby="settingsTitle"><form id="settingsForm"><div class="dialog-heading"><h2 id="settingsTitle">Server resource pools</h2><button class="icon-button" type="button" id="closeSettings" aria-label="Close settings">×</button></div><p class="muted">Shared by every job. Changes are available when all jobs have stopped.</p><label for="globalThreads">Total CPU thread pool</label><input id="globalThreads" type="number" min="1" step="1" required><label for="globalSlots">Maximum concurrent structures</label><input id="globalSlots" type="number" min="1" step="1" required><label for="globalMemory">Total memory budget (MB)</label><input id="globalMemory" type="number" min="1" step="1" required><p class="help" id="settingsUsage"></p><div class="notice error" id="settingsError" role="alert" hidden></div><div class="dialog-footer"><button type="button" class="button button-soft" id="cancelSettings">Cancel</button><button type="submit" class="button button-primary" id="saveSettings">Save settings</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <noscript><div class="no-script">JavaScript is required to submit and follow calculations. The Python library and HTTP API remain available.</div></noscript>
+</body>
+</html>
