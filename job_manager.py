@@ -16,6 +16,7 @@ import uuid
 from .core import METHODS, parse_reference
 from .runtime import default_data_dir, python_executable, stop_process, worker_environment
 from .storage import write_json
+from .resource_limits import memory_resources, default_memory_pool_mb
 
 BASIS = ('3zeta', '4zeta', '5zeta', 'CBS')
 TERMINAL_STATES = {'completed', 'failed', 'cancelled'}
@@ -114,8 +115,8 @@ class EnergyJobManager:
                     raise ValueError('expected a JSON object')
             except (OSError, ValueError) as error:
                 raise ValueError(f'Cannot read saved resource configuration: {error}') from error
-        self.pool_size = positive_int(saved.get('pool_size', 1) if pool_size is None else pool_size, 'pool_size')
-        self.memory_pool_mb = positive_int(saved.get('memory_pool_mb', 8192) if memory_pool_mb is None else memory_pool_mb, 'memory_pool_mb')
+        self.pool_size = positive_int(saved.get('pool_size', available_cpus()) if pool_size is None else pool_size, 'pool_size')
+        self.memory_pool_mb = positive_int(saved.get('memory_pool_mb', default_memory_pool_mb()) if memory_pool_mb is None else memory_pool_mb, 'memory_pool_mb')
         self.thread_pool_size = positive_int(saved.get('thread_pool_size', available_cpus()) if thread_pool_size is None else thread_pool_size, 'thread_pool_size')
         if self.thread_pool_size > available_cpus():
             raise ValueError('thread_pool_size exceeds available logical CPUs')
@@ -167,7 +168,8 @@ class EnergyJobManager:
             return {'pool_size': self.pool_size, 'memory_pool_mb': self.memory_pool_mb,
                     'slots_used': self._slots_used, 'memory_used_mb': self._memory_used,
                     'thread_pool_size': self.thread_pool_size, 'thread_used': self._threads_used,
-                    'cpu_count': available_cpus(), 'data_dir': str(self.data_dir), 'python': self.python}
+                    'cpu_count': available_cpus(), 'data_dir': str(self.data_dir), 'python': self.python,
+                    **memory_resources(), 'recommended_memory_pool_mb': default_memory_pool_mb()}
 
     def configure(self, *, pool_size=None, memory_pool_mb=None, thread_pool_size=None):
         with self._condition:

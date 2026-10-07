@@ -4,6 +4,7 @@
   const API = '/api/energyhub';
   const $ = id => document.getElementById(id);
   const form = $('taskForm');
+  const motion = window.EnergyhubMotion || { refresh() {}, feedback() {}, reveal(element, visible) { element.hidden = !visible; } };
   const terminal = new Set(['completed', 'failed', 'cancelled']);
   const state = { capabilities: null, config: null, jobs: [], total: 0, job: null, files: { tgz: null, ref: null }, reports: new Map(), reportErrors: new Map(), busy: false, connected: false, refreshing: false, initial: true, page: 'new', taskId: null, renderKey: '', historyLimit: 100, searchTimer: null };
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -82,12 +83,12 @@
     const parallel = $('parallelEnabled').checked;
     $('fullLabel').textContent = modelLabel(options);
     $('basisLabel').textContent = basisLabel(options.basis, options.basis_family, options.cbs_pair);
-    $('cbsInfo').hidden = !isCBS;
-    $('cbsPairChoices').hidden = !isCBS;
+    motion.reveal($('cbsInfo'), isCBS, !state.initial);
+    motion.reveal($('cbsPairChoices'), isCBS, !state.initial);
     const pair = options.cbs_pair === '45' ? '4ζ and 5ζ' : '3ζ and 4ζ';
     $('cbsBasisDescription').textContent = `Correlation energy is extrapolated from the ${pair} results; the HF component is extrapolated separately. Each structure runs at both basis sets.`;
     $('parallelState').textContent = parallel ? 'On' : 'Off';
-    $('threadsPerTaskRow').hidden = !parallel;
+    motion.reveal($('threadsPerTaskRow'), parallel, !state.initial);
     $('parallelHelp').textContent = parallel
       ? 'Structures run as separate tasks that share one thread pool and one memory pool. Each task gets a fixed number of threads; memory is split evenly between running tasks.'
       : 'Structures run one after another, each using the whole thread pool and memory pool.';
@@ -110,6 +111,13 @@
     else if (capability && !capability.open_shell) notice = `${options.method} supports closed-shell structures only in this PySCF environment. Open-shell input will be rejected explicitly.`;
     showError('methodNotice', notice);
     $('submitTask').disabled = state.busy || !state.connected || !capability?.available;
+    document.querySelectorAll('[data-step]').forEach(button => {
+      const [id, delta] = button.dataset.step.split(':'); const input = $(id);
+      const edge = Number(delta) > 0 ? Number(input.value) >= Number(input.max) : Number(input.value) <= Number(input.min);
+      button.disabled = edge;
+      button.title = edge && Number(delta) > 0 ? 'Server limit reached. Use Adjust limits to change the server pool.' : '';
+    });
+    motion.refresh(!state.initial);
   }
   function setRadio(name, value) { for (const input of form.querySelectorAll(`input[name="${name}"]`)) if (input.value === String(value) && !input.disabled) input.checked = true; }
   function updateCapabilities() {
@@ -139,6 +147,7 @@
     $('taskThreads').max = config.cpu_count || config.thread_pool_size || Number.MAX_SAFE_INTEGER;
     $('memoryPool').max = config.memory_pool_mb / 1024;
     $('memoryPool').min = 1 / 1024;
+    $('resourceLimitSummary').textContent = `Server limits: ${config.thread_pool_size ?? config.cpu_count ?? '—'} threads · ${formatGB(config.memory_pool_mb)} GB · ${config.pool_size} structures.`;
     $('globalPoolSummary').textContent = `Server pool: ${config.thread_pool_size ?? config.cpu_count ?? '—'} CPU threads · ${config.pool_size} concurrent slots · ${config.memory_pool_mb.toLocaleString()} MB. In use: ${config.slots_used} slots, ${config.memory_used_mb.toLocaleString()} MB.`;
     if (state.initial) {
       const threadLimit = config.thread_pool_size || config.cpu_count || 1;
@@ -171,16 +180,14 @@
     label.textContent = `${file.name} · ${file.size < 1024 ? `${file.size} B` : file.size < 1048576 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / 1048576).toFixed(1)} MB`}`;
     document.querySelector(`[data-upload="${kind}"]`).classList.add('has-file');
     document.querySelector(`[data-remove="${kind}"]`).hidden = false;
-    $('referenceOptions').hidden = false;
     showError('formError', '');
   }
   function removeFile(kind) {
     state.files[kind] = null;
     $(kind === 'tgz' ? 'archiveFile' : 'referenceFile').value = '';
-    $(kind === 'tgz' ? 'archiveFileLabel' : 'referenceFileLabel').textContent = kind === 'tgz' ? 'Drop a .tgz of .xyz files here, or click to choose. Line 2 of each .xyz holds charge and spin multiplicity.' : 'Add reference template (.ref)';
+    $(kind === 'tgz' ? 'archiveFileLabel' : 'referenceFileLabel').textContent = kind === 'tgz' ? 'Drop a .tgz of .xyz files here, or click to choose. Line 2 of each .xyz holds charge and spin multiplicity.' : 'Drop a .ref with reaction definitions and blank values, or click to choose.';
     document.querySelector(`[data-upload="${kind}"]`).classList.remove('has-file');
     document.querySelector(`[data-remove="${kind}"]`).hidden = true;
-    $('referenceOptions').hidden = !state.files.tgz && !state.files.ref;
   }
   function renderHistory() {
     const query = $('taskSearch').value.trim().toLowerCase();
@@ -255,6 +262,7 @@
     if (state.page === 'results') renderResults();
     if (state.page === 'task') { $('jobContent').innerHTML = '<p class="muted">Loading task…</p>'; loadJob(); }
     document.title = `CC energy — ${state.page === 'guide' ? 'guide' : state.page === 'results' ? 'results' : state.page === 'task' ? 'task' : 'new task'}`;
+    motion.refresh();
   }
   async function refresh() {
     if (state.refreshing) return;
@@ -366,6 +374,7 @@
     $('globalThreads').max = state.config.cpu_count || Number.MAX_SAFE_INTEGER;
     $('globalMemory').value = state.config.memory_pool_mb;
     $('settingsUsage').textContent = `Currently reserved: ${state.config.thread_used || 0} threads · ${state.config.slots_used} slots · ${state.config.memory_used_mb} MB. ${state.config.cpu_count || 'Unknown'} logical CPUs detected.`;
+    $('settingsMemory').textContent = state.config.memory_capacity_mb ? `Detected memory: ${formatGB(state.config.memory_capacity_mb)} GB. Suggested pool: ${formatGB(state.config.recommended_memory_pool_mb)} GB. Memory inputs below use MB.` : `Current configured memory limit: ${formatGB(state.config.memory_pool_mb)} GB. Change the total budget below to raise the limit.`;
     showError('settingsError', ''); $('settingsDialog').showModal();
   }
   async function saveSettings(event) {
@@ -382,6 +391,7 @@
   form.addEventListener('change', event => { if (event.target.name === 'task_threads_choice') $('taskThreads').value = event.target.value; updateForm(); });
   $('savePreset').addEventListener('click', savePreset);
   $('openSettings').addEventListener('click', openSettings);
+  $('openResourceSettings').addEventListener('click', openSettings);
   $('closeSettings').addEventListener('click', () => $('settingsDialog').close());
   $('cancelSettings').addEventListener('click', () => $('settingsDialog').close());
   $('settingsForm').addEventListener('submit', saveSettings);
@@ -412,7 +422,7 @@
   document.addEventListener('click', event => {
     const button = event.target.closest('button');
     if (!button) return;
-    if (button.dataset.step) { const [id, delta] = button.dataset.step.split(':'); const input = $(id); const step = id === 'memoryPool' && Number(input.max) < 32 ? Math.sign(Number(delta)) * Math.max(1 / 1024, Number(input.max) / 8) : Number(delta); input.value = Math.min(Number(input.max) || Infinity, Math.max(Number(input.min) || 1, (Number(input.value) || 1) + step)); updateForm(); }
+    if (button.dataset.step) { const [id, delta] = button.dataset.step.split(':'); const input = $(id); const step = id === 'memoryPool' ? Math.sign(Number(delta)) * Math.max(1 / 1024, Math.min(32, 2 ** Math.floor(Math.log2(Number(input.max) / 8)))) : Number(delta); input.value = Math.min(Number(input.max) || Infinity, Math.max(Number(input.min) || 1, (Number(input.value) || 1) + step)); updateForm(); motion.feedback(input); }
     if (button.dataset.remove) removeFile(button.dataset.remove);
     if (button.id === 'cancelTask') cancelTask(button);
     if (button.id === 'loadSample') loadSample(button);

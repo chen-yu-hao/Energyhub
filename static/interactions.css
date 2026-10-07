@@ -1,0 +1,62 @@
+/* Keep resource controls stable at intermediate viewport widths as well as desktop. */
+#newView .resource-control { align-items: stretch; text-align: left; }
+#newView .resource-control > label { align-self: stretch; width: 100%; text-align: left; }
+#newView .resource-control .stepper {
+  width: 100%; display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center; justify-content: stretch; gap: 8px;
+}
+#newView .resource-value { justify-self: center; max-width: 100%; font-family: var(--fd); }
+#newView .resource-value .input-unit { flex: none; }
+#newView .stepper > button { width: 40px; height: 40px; padding: 0; }
+#newView .stepper > button > svg { display: block; width: 12px; height: 12px; flex: none; }
+.new-task-link { font-size: 15px; font-weight: 600; gap: 12px; min-height: 52px; }
+.new-task-link .plus { width: 28px; height: 28px; flex: 0 0 28px; }
+.new-task-link .plus > svg { display: block; width: 14px; height: 14px; flex: none; }
+.new-task-link, .task-link, .stepper > button, .button, .account-button {
+  transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms cubic-bezier(.22,1,.36,1), opacity 180ms ease;
+}
+.new-task-link:hover { background: rgba(0,113,227,.12); }
+.new-task-link:active { transform: scale(.993); }
+#newView .stepper > button:hover:not(:disabled) { background: #f9fbff; box-shadow: inset 0 0 0 1px rgba(0,113,227,.32); }
+#newView .stepper > button:active:not(:disabled) { transform: scale(.94); }
+#newView .stepper > button:disabled { cursor: default; opacity: .35; }
+
+/* One moving surface for each selector, rather than an abrupt recoloring. */
+.segments.has-selection-motion, .option-grid.has-selection-motion, .nav-links.has-selection-motion { position: relative; isolation: isolate; }
+.selection-indicator {
+  position: absolute; top: 0; left: 0; width: var(--selection-width, 0px); height: var(--selection-height, 0px);
+  transform: translate3d(var(--selection-x, 0px), var(--selection-y, 0px), 0);
+  border-radius: 999px; background: #1d1d1f; pointer-events: none; opacity: 0; z-index: -1;
+  transition: transform 360ms cubic-bezier(.22,1,.36,1), width 360ms cubic-bezier(.22,1,.36,1), height 360ms cubic-bezier(.22,1,.36,1), opacity 180ms ease;
+}
+.segments.has-selection-motion { z-index: 0; }
+.segments.has-selection-motion > .selection-indicator { z-index: 0; }
+.segments.has-selection-motion > .segment-choice, .segments.has-selection-motion > .segment { position: relative; z-index: 1; }
+.segments.has-selection-motion .segment-choice input:checked + span,
+.segments.has-selection-motion .segment.selected { background: transparent; box-shadow: none; }
+.segment-choice span, .segment { transition: color 200ms ease, opacity 180ms ease; }
+.segment-choice:active span { opacity: .8; }
+.option-grid.has-selection-motion > .selection-indicator {
+  z-index: 1; border-radius: 18px; background: rgba(0,113,227,.06); box-shadow: inset 0 0 0 2px #0071e3;
+}
+.option-grid.has-selection-motion .option-card { z-index: auto; background: #fff; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+.option-grid.has-selection-motion .option-card:has(input:checked) { background: #fff; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+#newView .option-grid.has-selection-motion .option-content { position: relative; z-index: 2; }
+.nav-links.has-selection-motion > .selection-indicator { z-index: 0; background: rgba(118,118,128,.14); }
+.nav-links.has-selection-motion > a { z-index: 1; position: relative; }
+.nav-links.has-selection-motion > a[aria-current="page"] { background: transparent; }
+#newView .switch-track, #newView .switch-label input:checked + .switch-track { justify-content: flex-start; transition: background-color 250ms ease; }
+#newView .switch-track::after { transform: translateX(0); transition: transform 300ms cubic-bezier(.22,1,.36,1); }
+#newView .switch-label input:checked + .switch-track::after { transform: translateX(18px); }
+
+.reference-upload .drop-zone:not(.has-file) { background: #fff; }
+.upload-wrap .remove-file { position: static; padding: 0; margin-top: 10px; font-size: 13px; }
+.resource-limits { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: #6e6e73; }
+.resource-limits .text-button { padding: 0; font-size: inherit; white-space: nowrap; }
+.settings-link { color: #0066cc; background: transparent; border: 0; padding: 0; text-decoration: none; font-size: inherit; cursor: pointer; }
+.settings-link:hover { text-decoration: underline; }
+
+@media (prefers-reduced-motion: reduce) {
+  .selection-indicator, .segment-choice span, .segment, .switch-track, .switch-track::after,
+  .new-task-link, .task-link, .stepper > button, .button, .account-button { transition: none !important; animation: none !important; }
+}

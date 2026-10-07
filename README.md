@@ -36,7 +36,7 @@ energyhub serve --data-dir ./energyhub-data
 ## 第一次计算
 
 1. 在 **New CC energy task** 中填写任务名称，选择方法和基组。
-2. 上传包含 XYZ 文件的 `.tgz`。需要反应参考值时，可同时选择 `.ref`，或在选好归档后点击添加参考模板；不提供模板时计算各结构总能。
+2. 上传包含 XYZ 文件的 `.tgz`。需要反应参考值时，使用独立的 `.ref` 上传区；不提供模板时计算各结构总能。
 3. 设置线程池、每个分子的线程数和内存预算，点击 **Run calculation**。
 4. 在左侧选择任务查看进度；完成后下载 `.ref`、JSON 报告或 CSV。
 
@@ -103,7 +103,9 @@ H 0 0 0.74
 
 ## 资源、队列与终止
 
-服务拥有三类全局限制，可以在 **Settings** 或启动参数中设置：
+服务拥有三类全局限制，可以在 **Settings**、资源区的 **Adjust limits** 或启动参数中设置。未指定配置时，并发结构上限采用可用 CPU 数；内存池根据探测到的总量和可用量取较小值的约 80%，再向下取整，识别得到的容器内存限制也会纳入计算。已有保存配置会被保留。8 GB 仅在无法探测内存时作为后备值，不是固定上限。
+
+例如：
 
 ```bash
 energyhub serve \
@@ -183,7 +185,7 @@ curl -F name='H2 reference' \
 python -m pip install build
 python -m build
 # 将 dist 中的 wheel 复制到目标机器，然后：
-python -m pip install 'dfthub_energyhub-0.2.2-py3-none-any.whl[all]'
+python -m pip install 'dfthub_energyhub-0.2.3-py3-none-any.whl[all]'
 energyhub doctor
 energyhub serve --data-dir /path/to/energyhub-data
 ```
@@ -201,4 +203,4 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 测试覆盖 `.ref` 格式和单位、方法调度、非零 `(T)/(Q)` 修正、CBS、资源预算、取消与重启、前后端 API，以及移位后的 wheel 安装。真实计算测试使用小分子，仍需要可用的 PySCF 环境。
 
-浏览器验证说明见 [tests/browser_smoke.py](tests/browser_smoke.py)。CI 会运行测试并构建发行包。
+浏览器验证说明见 [tests/browser_smoke.py](tests/browser_smoke.py)。选择滑块、快速切换、减少动态效果以及 729px 控件布局另由 [tests/browser_interactions.py](tests/browser_interactions.py) 验证。CI 会运行测试并构建发行包。
