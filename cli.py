@@ -29,6 +29,7 @@ def _parser():
     parser.add_argument('--python', help='existing PySCF Python executable (also ENERGYHUB_PYTHON)', default=argparse.SUPPRESS)
     commands = parser.add_subparsers(dest='command', required=True)
     serve = commands.add_parser('serve', help='start the frontend and HTTP API')
+    serve.add_argument('--resources', choices=['auto', 'manual'], default=os.environ.get('ENERGYHUB_RESOURCE_MODE'), help='automatic live resource detection or fixed manual limits')
     serve.add_argument('--host', default='127.0.0.1')
     serve.add_argument('--port', type=_positive, default=2022)
     serve.add_argument('--pool-size', type=_positive, default=os.environ.get('ENERGYHUB_POOL_SIZE'), help='global concurrent molecule limit')
@@ -62,7 +63,7 @@ def _serve(args):
             raise RuntimeError('Flask is required for the web application. Install dfthub-energyhub[api].') from error
         raise
     app = create_app(data_dir=args.data_dir, pool_size=args.pool_size,
-                     memory_pool_mb=args.memory_pool_mb, thread_pool_size=args.thread_pool_size)
+                     memory_pool_mb=args.memory_pool_mb, thread_pool_size=args.thread_pool_size, resource_mode=args.resources)
     previous = signal.getsignal(signal.SIGTERM)
 
     def terminate(signum, frame):

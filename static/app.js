@@ -6,7 +6,7 @@
   const form = $('taskForm');
   const motion = window.EnergyhubMotion || { refresh() {}, feedback() {}, reveal(element, visible) { element.hidden = !visible; } };
   const terminal = new Set(['completed', 'failed', 'cancelled']);
-  const state = { capabilities: null, config: null, jobs: [], total: 0, job: null, files: { tgz: null, ref: null }, reports: new Map(), reportErrors: new Map(), busy: false, connected: false, refreshing: false, initial: true, page: 'new', taskId: null, renderKey: '', historyLimit: 100, searchTimer: null };
+  const state = { capabilities: null, config: null, jobs: [], total: 0, job: null, files: { tgz: null, ref: null }, reports: new Map(), reportErrors: new Map(), busy: false, connected: false, refreshing: false, initial: true, page: 'new', taskId: null, renderKey: '', historyLimit: 100, searchTimer: null, resourceEdited: new Set() };
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const number = (value, digits = 10) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—';
   const integer = id => Number($(id).value);
@@ -115,7 +115,7 @@
       const [id, delta] = button.dataset.step.split(':'); const input = $(id);
       const edge = Number(delta) > 0 ? Number(input.value) >= Number(input.max) : Number(input.value) <= Number(input.min);
       button.disabled = edge;
-      button.title = edge && Number(delta) > 0 ? 'Server limit reached. Use Adjust limits to change the server pool.' : '';
+      button.title = edge && Number(delta) > 0 ? 'Server limit reached. Open Resource settings to review the server pool.' : '';
     });
     motion.refresh(!state.initial);
   }
@@ -141,21 +141,31 @@
     $('engineLabel').textContent = state.capabilities.pyscf_version ? `PySCF ${state.capabilities.pyscf_version} · connected` : 'PySCF unavailable';
     $('engineDot').className = `status-dot ${state.capabilities.pyscf_version ? 'completed' : 'failed'}`;
   }
-  function updateConfig() {
+  function updateConfig({ reset = false } = {}) {
     const config = state.config;
-    $('threadBudget').max = config.thread_pool_size || config.cpu_count || Number.MAX_SAFE_INTEGER;
-    $('taskThreads').max = config.cpu_count || config.thread_pool_size || Number.MAX_SAFE_INTEGER;
+    const automatic = config.resource_mode === 'auto';
+    const threadLimit = config.thread_pool_size || config.cpu_count || 1;
+    $('threadBudget').max = threadLimit;
+    $('taskThreads').max = config.cpu_count || threadLimit;
     $('memoryPool').max = config.memory_pool_mb / 1024;
     $('memoryPool').min = 1 / 1024;
-    $('resourceLimitSummary').textContent = `Server limits: ${config.thread_pool_size ?? config.cpu_count ?? '—'} threads · ${formatGB(config.memory_pool_mb)} GB · ${config.pool_size} structures.`;
-    $('globalPoolSummary').textContent = `Server pool: ${config.thread_pool_size ?? config.cpu_count ?? '—'} CPU threads · ${config.pool_size} concurrent slots · ${config.memory_pool_mb.toLocaleString()} MB. In use: ${config.slots_used} slots, ${config.memory_used_mb.toLocaleString()} MB.`;
-    if (state.initial) {
-      const threadLimit = config.thread_pool_size || config.cpu_count || 1;
-      const preferred = [1, 2, 4, 8].filter(value => value <= threadLimit).pop() || 1;
-      $('taskThreads').value = preferred;
-      $('threadBudget').value = Math.max(1, Math.min(64, threadLimit, config.pool_size * preferred));
-      $('memoryPool').value = Math.min(256, config.memory_pool_mb / 1024);
-    }
+    const available = Number.isFinite(config.memory_available_mb) ? `${formatGB(config.memory_available_mb)} GB RAM available` : 'Available RAM unknown';
+    const total = Number.isFinite(config.memory_capacity_mb) ? ` / ${formatGB(config.memory_capacity_mb)} GB total` : '';
+    $('resourceLimitSummary').textContent = `${automatic ? 'Auto' : 'Manual'} · ${config.cpu_count || threadLimit} CPU threads · ${available}${total} · ${formatGB(config.memory_pool_mb)} GB pool.`;
+    if (config.resource_pressure) $('resourceLimitSummary').textContent += ' Active allocations are retained; new work waits for resources.';
+    $('resourceLimitSummary').title = config.resources_checked_at ? `Server resources checked at ${datetime(config.resources_checked_at)}` : '';
+    $('globalPoolSummary').textContent = `Server pool: ${threadLimit} CPU threads · ${config.pool_size} concurrent slots · ${config.memory_pool_mb.toLocaleString()} MB. Reserved: ${config.slots_used} slots, ${config.memory_used_mb.toLocaleString()} MB.`;
+    const follow = id => reset || state.initial || (!state.resourceEdited.has(id) && document.activeElement !== $(id));
+    if (follow('taskThreads')) $('taskThreads').value = [1, 2, 4, 8].filter(value => value <= threadLimit).pop() || 1;
+    if (follow('threadBudget')) $('threadBudget').value = Math.max(1, Math.min(64, threadLimit, config.pool_size * integer('taskThreads')));
+    if (follow('memoryPool')) $('memoryPool').value = Math.min(256, config.memory_pool_mb / 1024);
+    if ($('settingsDialog').open) syncSettings();
+  }
+  function useServerResources() {
+    state.resourceEdited.clear();
+    updateConfig({ reset: true });
+    updateForm();
+    toast('Current server resource values applied.');
   }
   function savePreset() {
     try { localStorage.setItem('energyhub.preset.v1', JSON.stringify({ ...chosenSettings(), parallel: $('parallelEnabled').checked, per_structure_threads: integer('taskThreads') })); toast('Preset saved in this browser. It will load for your next visit.'); }
@@ -166,7 +176,7 @@
       const preset = JSON.parse(localStorage.getItem('energyhub.preset.v1') || 'null');
       if (!preset || typeof preset !== 'object') return;
       for (const field of ['method', 'basis', 'basis_family', 'cbs_pair']) if (preset[field]) setRadio(field, preset[field]);
-      for (const [id, key] of [['threadBudget', 'thread_budget'], ['taskThreads', 'per_structure_threads'], ['memoryPool', 'memory_pool_mb']]) if (Number.isSafeInteger(preset[key]) && preset[key] > 0) $(id).value = Math.min(id === 'memoryPool' ? preset[key] / 1024 : preset[key], Number($(id).max) || Infinity);
+      for (const [id, key] of [['threadBudget', 'thread_budget'], ['taskThreads', 'per_structure_threads'], ['memoryPool', 'memory_pool_mb']]) if (Number.isSafeInteger(preset[key]) && preset[key] > 0) { $(id).value = Math.min(id === 'memoryPool' ? preset[key] / 1024 : preset[key], Number($(id).max) || Infinity); state.resourceEdited.add(id); }
       if (typeof preset.parallel === 'boolean') $('parallelEnabled').checked = preset.parallel;
     } catch (_) { /* A corrupt or unavailable preference store must not block work. */ }
   }
@@ -343,6 +353,7 @@
     $('threadBudget').value = job.thread_budget || job.pool_size * job.task_threads;
     $('taskThreads').value = job.task_threads;
     $('memoryPool').value = job.memory_pool_mb / 1024;
+    ['threadBudget', 'taskThreads', 'memoryPool'].forEach(id => state.resourceEdited.add(id));
     $('parallelEnabled').checked = job.pool_size > 1;
     $('taskName').value = `${title(job)} — repeat`.slice(0, 120);
     updateForm(); location.hash = 'new'; toast('Settings copied. Choose the archive and reference files to run again.');
@@ -367,31 +378,56 @@
     } catch (error) { toast(error.message); }
     finally { button.disabled = false; }
   }
+  function syncSettings() {
+    const config = state.config;
+    const automatic = $('autoResources').checked;
+    for (const id of ['globalThreads', 'globalSlots', 'globalMemory']) $(id).disabled = automatic;
+    $('globalThreads').max = config.cpu_count || Number.MAX_SAFE_INTEGER;
+    if (automatic) {
+      $('globalThreads').value = config.cpu_count || 1;
+      $('globalSlots').value = config.cpu_count || 1;
+      $('globalMemory').value = config.recommended_memory_pool_mb || config.memory_pool_mb;
+    }
+    const checked = config.resources_checked_at ? ` Checked ${new Date(config.resources_checked_at * 1000).toLocaleTimeString()}.` : '';
+    $('settingsUsage').textContent = `Reserved: ${config.thread_used || 0} threads · ${config.slots_used} slots · ${config.memory_used_mb} MB. ${config.cpu_count || 'Unknown'} logical CPUs detected.${checked}`;
+    const free = Number.isFinite(config.memory_available_mb) ? `${formatGB(config.memory_available_mb)} GB available` : 'Available memory unknown';
+    const total = config.memory_capacity_mb ? `${formatGB(config.memory_capacity_mb)} GB total` : 'Total memory unknown';
+    $('settingsMemory').textContent = `${total} · ${free}. Automatic budget: ${formatGB(config.recommended_memory_pool_mb || config.memory_pool_mb)} GB. Fixed inputs use MB.`;
+  }
   function openSettings() {
     if (!state.config) { toast('Connect to the server before changing resource pools.'); return; }
+    $('autoResources').checked = state.config.resource_mode === 'auto';
     $('globalSlots').value = state.config.pool_size;
     $('globalThreads').value = state.config.thread_pool_size || state.config.cpu_count || 1;
-    $('globalThreads').max = state.config.cpu_count || Number.MAX_SAFE_INTEGER;
     $('globalMemory').value = state.config.memory_pool_mb;
-    $('settingsUsage').textContent = `Currently reserved: ${state.config.thread_used || 0} threads · ${state.config.slots_used} slots · ${state.config.memory_used_mb} MB. ${state.config.cpu_count || 'Unknown'} logical CPUs detected.`;
-    $('settingsMemory').textContent = state.config.memory_capacity_mb ? `Detected memory: ${formatGB(state.config.memory_capacity_mb)} GB. Suggested pool: ${formatGB(state.config.recommended_memory_pool_mb)} GB. Memory inputs below use MB.` : `Current configured memory limit: ${formatGB(state.config.memory_pool_mb)} GB. Change the total budget below to raise the limit.`;
+    syncSettings();
     showError('settingsError', ''); $('settingsDialog').showModal();
   }
   async function saveSettings(event) {
     event.preventDefault();
     $('saveSettings').disabled = true;
     try {
-      state.config = { ...state.config, ...await request('/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pool_size: integer('globalSlots'), memory_pool_mb: integer('globalMemory'), thread_pool_size: integer('globalThreads') }) }) };
-      updateConfig(); updateForm(); $('settingsDialog').close(); toast('Server resource pools updated.');
+      const options = $('autoResources').checked ? { resource_mode: 'auto' } : {
+        resource_mode: 'manual', pool_size: integer('globalSlots'), memory_pool_mb: integer('globalMemory'), thread_pool_size: integer('globalThreads')
+      };
+      state.config = { ...state.config, ...await request('/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) }) };
+      $('settingsDialog').close(); updateConfig(); updateForm(); toast($('autoResources').checked ? 'Automatic server resource detection enabled.' : 'Fixed resource limits saved.');
     } catch (error) { showError('settingsError', error.message); }
     finally { $('saveSettings').disabled = false; }
   }
+  function resourceInput(event) {
+    if (event.target.name === 'task_threads_choice') { $('taskThreads').value = event.target.value; state.resourceEdited.add('taskThreads'); }
+    if (['threadBudget', 'memoryPool', 'taskThreads'].includes(event.target.id)) state.resourceEdited.add(event.target.id);
+    updateForm();
+  }
   form.addEventListener('submit', submit);
-  form.addEventListener('input', event => { if (event.target.name === 'task_threads_choice') $('taskThreads').value = event.target.value; updateForm(); });
-  form.addEventListener('change', event => { if (event.target.name === 'task_threads_choice') $('taskThreads').value = event.target.value; updateForm(); });
+  form.addEventListener('input', resourceInput);
+  form.addEventListener('change', resourceInput);
   $('savePreset').addEventListener('click', savePreset);
   $('openSettings').addEventListener('click', openSettings);
   $('openResourceSettings').addEventListener('click', openSettings);
+  $('autoResources').addEventListener('change', syncSettings);
+  $('useServerResources').addEventListener('click', useServerResources);
   $('closeSettings').addEventListener('click', () => $('settingsDialog').close());
   $('cancelSettings').addEventListener('click', () => $('settingsDialog').close());
   $('settingsForm').addEventListener('submit', saveSettings);
@@ -422,7 +458,7 @@
   document.addEventListener('click', event => {
     const button = event.target.closest('button');
     if (!button) return;
-    if (button.dataset.step) { const [id, delta] = button.dataset.step.split(':'); const input = $(id); const step = id === 'memoryPool' ? Math.sign(Number(delta)) * Math.max(1 / 1024, Math.min(32, 2 ** Math.floor(Math.log2(Number(input.max) / 8)))) : Number(delta); input.value = Math.min(Number(input.max) || Infinity, Math.max(Number(input.min) || 1, (Number(input.value) || 1) + step)); updateForm(); motion.feedback(input); }
+    if (button.dataset.step) { const [id, delta] = button.dataset.step.split(':'); const input = $(id); state.resourceEdited.add(id); const step = id === 'memoryPool' ? Math.sign(Number(delta)) * Math.max(1 / 1024, Math.min(32, 2 ** Math.floor(Math.log2(Number(input.max) / 8)))) : Number(delta); input.value = Math.min(Number(input.max) || Infinity, Math.max(Number(input.min) || 1, (Number(input.value) || 1) + step)); updateForm(); motion.feedback(input); }
     if (button.dataset.remove) removeFile(button.dataset.remove);
     if (button.id === 'cancelTask') cancelTask(button);
     if (button.id === 'loadSample') loadSample(button);

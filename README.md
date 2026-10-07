@@ -103,12 +103,22 @@ H 0 0 0.74
 
 ## 资源、队列与终止
 
-服务拥有三类全局限制，可以在 **Settings**、资源区的 **Adjust limits** 或启动参数中设置。未指定配置时，并发结构上限采用可用 CPU 数；内存池根据探测到的总量和可用量取较小值的约 80%，再向下取整，识别得到的容器内存限制也会纳入计算。已有保存配置会被保留。8 GB 仅在无法探测内存时作为后备值，不是固定上限。
+服务默认使用 **自动检测**：持续读取当前服务器可用 CPU、总内存、可用内存和容器内存限制。资源探测最多缓存 2 秒，网页约每 3.5 秒刷新一次；提交任务和排队调度也会检查资源，因此不需要一直打开网页。自动内存预算取当前容量与可用内存中较小值的约 80%，再向下取整；8 GB 仅是无法探测时的后备值。
 
-例如：
+资源下降时，已运行任务保留原有额度，调度器暂缓新任务；资源恢复后继续执行。页面分别显示实时可用内存、池额度和已预约资源。未经手动修改的任务输入会跟随服务器额度；已经编辑的值或上传文件不会被轮询覆盖，可点 **Use server values** 重新采用当前值。
+
+在 **Resource settings** 中可切换自动检测和手动固定模式。自动模式只保存模式，不保存机器专属数字，迁移或重启后会重新探测。旧版保存的固定额度会作为手动模式保留；选择自动模式即可取消旧的固定额度。
+
+自动启动：
 
 ```bash
-energyhub serve \
+energyhub serve --resources auto --data-dir ./energyhub-data
+```
+
+手动指定固定额度：
+
+```bash
+energyhub serve --resources manual \
   --thread-pool-size 16 \
   --pool-size 4 \
   --memory-pool-mb 16384 \
@@ -119,7 +129,7 @@ energyhub serve \
 - `pool-size`：同时运行的分子数上限。
 - `memory-pool-mb`：所有运行任务共享的内存预约预算。
 
-新任务界面按设计显示 GB 内存步进器和每任务线程分段按钮，提交时自动将 GB 换算成 MB。线程池和每分子线程数决定并发数；界面会显示分配预览。调度器同时检查分子数、CPU 线程和内存，不够时排队。全局配置只能在没有活动任务时修改，并保存在数据目录中。
+新任务界面按设计显示 GB 内存步进器和每任务线程分段按钮，提交时自动将 GB 换算成 MB。线程池和每分子线程数决定并发数；界面会显示分配预览。调度器同时检查分子数、CPU 线程和内存，不够时排队。切换模式和修改手动额度需要队列空闲；自动模式的资源检查会在任务运行期间持续进行。显式指定固定池大小的启动参数会选择手动模式，不应与 `--resources auto` 同时使用。
 
 内存数值最终交给 PySCF 的 `max_memory`；这是工作内存提示，不是操作系统的硬 RSS 限额。机器还需要为 Python、积分和数值库留出额外空间。
 
@@ -156,7 +166,7 @@ print(report.to_dict())
 | 请求 | 用途 |
 | --- | --- |
 | `GET /methods` | 方法、基组和环境能力；`?refresh=1` 重新检查 |
-| `GET /config` / `PUT /config` | 读取或修改全局资源配置 |
+| `GET /config` / `PUT /config` | 实时资源及自动/手动模式；`?refresh=1` 强制刷新，PUT `{"resource_mode":"auto"}` 启用自动检测 |
 | `GET /jobs` | 任务历史，支持搜索与分页 |
 | `POST /jobs` | 上传 `tgz`、`ref` 和计算选项，返回 `task_id` |
 | `GET /jobs/{id}` | 状态、进度与结果摘要 |
@@ -185,7 +195,7 @@ curl -F name='H2 reference' \
 python -m pip install build
 python -m build
 # 将 dist 中的 wheel 复制到目标机器，然后：
-python -m pip install 'dfthub_energyhub-0.2.3-py3-none-any.whl[all]'
+python -m pip install 'dfthub_energyhub-0.2.4-py3-none-any.whl[all]'
 energyhub doctor
 energyhub serve --data-dir /path/to/energyhub-data
 ```
@@ -204,3 +214,5 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 测试覆盖 `.ref` 格式和单位、方法调度、非零 `(T)/(Q)` 修正、CBS、资源预算、取消与重启、前后端 API，以及移位后的 wheel 安装。真实计算测试使用小分子，仍需要可用的 PySCF 环境。
 
 浏览器验证说明见 [tests/browser_smoke.py](tests/browser_smoke.py)。选择滑块、快速切换、减少动态效果以及 729px 控件布局另由 [tests/browser_interactions.py](tests/browser_interactions.py) 验证。CI 会运行测试并构建发行包。
+
+自动资源的变化、任务预约保护与队列恢复由 `tests/test_dynamic_resources.py` 验证，页面轮询与输入保留由 `tests/browser_dynamic_resources.py` 验证。

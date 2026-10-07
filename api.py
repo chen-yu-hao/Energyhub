@@ -22,7 +22,7 @@ def create_blueprint(manager=None):
 
     @bp.get('/config')
     def get_config():
-        return jsonify({**service().config(), 'max_upload_bytes': current_app.config['MAX_CONTENT_LENGTH']})
+        return jsonify({**service().config(refresh=request.args.get('refresh', '').lower() in ('1', 'true')), 'max_upload_bytes': current_app.config['MAX_CONTENT_LENGTH']})
 
     @bp.put('/config')
     def set_config():
@@ -32,7 +32,7 @@ def create_blueprint(manager=None):
         try:
             return jsonify(service().configure(pool_size=body.get('pool_size'),
                 memory_pool_mb=body.get('memory_pool_mb', body.get('memory_pool_size')),
-                thread_pool_size=body.get('thread_pool_size')))
+                thread_pool_size=body.get('thread_pool_size'), resource_mode=body.get('resource_mode')))
         except RuntimeError as error:
             return jsonify(error=str(error)), 409
         except (TypeError, ValueError) as error:
@@ -121,20 +121,21 @@ def create_blueprint(manager=None):
 def register_energyhub(app, manager=None):
     manager = manager or EnergyJobManager(pool_size=os.environ.get('ENERGYHUB_POOL_SIZE'),
                                         memory_pool_mb=os.environ.get('ENERGYHUB_MEMORY_MB'),
-                                        thread_pool_size=os.environ.get('ENERGYHUB_THREAD_POOL_SIZE'))
+                                        thread_pool_size=os.environ.get('ENERGYHUB_THREAD_POOL_SIZE'), resource_mode=os.environ.get('ENERGYHUB_RESOURCE_MODE'))
     app.extensions['energyhub_manager'] = manager
     app.register_blueprint(create_blueprint(manager))
     return manager
 
 
 def create_app(manager=None, *, data_dir=None, pool_size=None, memory_pool_mb=None, memory_pool_size=None,
-               thread_pool_size=None):
+               thread_pool_size=None, resource_mode=None):
     if memory_pool_mb is None:
         memory_pool_mb = memory_pool_size
     manager = manager or EnergyJobManager(data_dir,
         os.environ.get('ENERGYHUB_POOL_SIZE') if pool_size is None else pool_size,
         os.environ.get('ENERGYHUB_MEMORY_MB') if memory_pool_mb is None else memory_pool_mb,
-        thread_pool_size=os.environ.get('ENERGYHUB_THREAD_POOL_SIZE') if thread_pool_size is None else thread_pool_size)
+        thread_pool_size=os.environ.get('ENERGYHUB_THREAD_POOL_SIZE') if thread_pool_size is None else thread_pool_size,
+        resource_mode=os.environ.get('ENERGYHUB_RESOURCE_MODE') if resource_mode is None else resource_mode)
     static_dir = Path(__file__).resolve().parent / 'static'
     app = Flask(__name__, static_folder=str(static_dir), static_url_path='/static')
     app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('ENERGYHUB_MAX_UPLOAD_BYTES', 64 * 1024**2))

@@ -60,3 +60,7 @@
   .selection-indicator, .segment-choice span, .segment, .switch-track, .switch-track::after,
   .new-task-link, .task-link, .stepper > button, .button, .account-button { transition: none !important; animation: none !important; }
 }
+
+.auto-resource-setting { display: flex; align-items: center; gap: 10px; margin: 20px 0 8px; font-weight: 600; }
+#settingsForm .auto-resource-setting input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: #0071e3; }
+#settingsForm input:disabled { color: #6e6e73; background: #f5f5f7; cursor: default; }

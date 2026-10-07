@@ -92,8 +92,11 @@ async def main():
         await expect(page.locator('#resultsContent')).to_contain_text(title)
         await page.locator('#openSettings').click()
         await expect(page.locator('#settingsDialog')).to_be_visible()
-        current_memory=await page.locator('#globalMemory').input_value()
-        await page.locator('#globalMemory').fill(current_memory)
+        if await page.locator('#autoResources').is_checked():
+            await expect(page.locator('#globalMemory')).to_be_disabled()
+        else:
+            current_memory=await page.locator('#globalMemory').input_value()
+            await page.locator('#globalMemory').fill(current_memory)
         await page.locator('#saveSettings').click()
         await expect(page.locator('#settingsDialog')).not_to_be_visible()
         await page.locator('#newTaskLink').click()

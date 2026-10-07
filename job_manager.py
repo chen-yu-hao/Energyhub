@@ -21,6 +21,7 @@ from .resource_limits import memory_resources, default_memory_pool_mb
 BASIS = ('3zeta', '4zeta', '5zeta', 'CBS')
 TERMINAL_STATES = {'completed', 'failed', 'cancelled'}
 JobState = Literal['queued', 'running', 'cancelling', 'completed', 'failed', 'cancelled']
+RESOURCE_REFRESH_SECONDS = 2.0
 WORKER_OPTIONS = ('method', 'basis', 'basis_family', 'cbs_pair', 'pool_size', 'task_threads', 'memory_mb', 'memory_pool_mb')
 
 
@@ -104,7 +105,7 @@ class EnergyJobManager:
     limit; native-library overhead should be allowed for when sizing the pool.
     """
     def __init__(self, data_dir=None, pool_size=None, memory_pool_mb=None, *,
-                 thread_pool_size=None, worker_module='Energyhub.worker'):
+                 thread_pool_size=None, resource_mode=None, worker_module='Energyhub.worker'):
         self.data_dir = Path(data_dir or default_data_dir()).expanduser().resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         saved = {}
@@ -115,10 +116,27 @@ class EnergyJobManager:
                     raise ValueError('expected a JSON object')
             except (OSError, ValueError) as error:
                 raise ValueError(f'Cannot read saved resource configuration: {error}') from error
-        self.pool_size = positive_int(saved.get('pool_size', available_cpus()) if pool_size is None else pool_size, 'pool_size')
-        self.memory_pool_mb = positive_int(saved.get('memory_pool_mb', default_memory_pool_mb()) if memory_pool_mb is None else memory_pool_mb, 'memory_pool_mb')
-        self.thread_pool_size = positive_int(saved.get('thread_pool_size', available_cpus()) if thread_pool_size is None else thread_pool_size, 'thread_pool_size')
-        if self.thread_pool_size > available_cpus():
+        explicit_limits = any(value is not None for value in (pool_size, memory_pool_mb, thread_pool_size))
+        saved_mode = saved.get('resource_mode', 'manual' if any(key in saved for key in ('pool_size', 'memory_pool_mb', 'thread_pool_size')) else 'auto')
+        self.resource_mode = resource_mode if resource_mode is not None else ('manual' if explicit_limits else saved_mode)
+        if self.resource_mode not in ('auto', 'manual'):
+            raise ValueError('resource_mode must be auto or manual')
+        if resource_mode == 'auto' and explicit_limits:
+            raise ValueError('Automatic mode detects resource limits; omit fixed pool limits')
+        self._resource_snapshot = memory_resources()
+        self._detected_cpus = available_cpus()
+        self._recommended_memory = default_memory_pool_mb(self._resource_snapshot)
+        self._resources_checked_at = time.monotonic()
+        self._resources_wall_time = time.time()
+        self._retired_executors = []
+        if self.resource_mode == 'auto':
+            self.pool_size = self.thread_pool_size = self._detected_cpus
+            self.memory_pool_mb = self._recommended_memory
+        else:
+            self.pool_size = positive_int(saved.get('pool_size', self._detected_cpus) if pool_size is None else pool_size, 'pool_size')
+            self.memory_pool_mb = positive_int(saved.get('memory_pool_mb', self._recommended_memory) if memory_pool_mb is None else memory_pool_mb, 'memory_pool_mb')
+            self.thread_pool_size = positive_int(saved.get('thread_pool_size', self._detected_cpus) if thread_pool_size is None else thread_pool_size, 'thread_pool_size')
+        if self.thread_pool_size > self._detected_cpus:
             raise ValueError('thread_pool_size exceeds available logical CPUs')
         self._directory_lock = (self.data_dir / '.service.lock').open('a+')
         if os.name == 'posix':
@@ -138,6 +156,7 @@ class EnergyJobManager:
         self._capabilities_checked_at = time.monotonic()
         self._jobs = {}
         self._executor = ThreadPoolExecutor(max_workers=self.pool_size, thread_name_prefix='energyhub')
+        self._executor_capacity = self.pool_size
         for metadata in self.data_dir.glob('*/task.json'):
             job = self._load_metadata(metadata.parent.name)
             if job:
@@ -163,29 +182,80 @@ class EnergyJobManager:
                 self._capabilities_checked_at = time.monotonic()
             return self._capabilities
 
-    def config(self):
-        with self._lock:
+    def _resize_executor_locked(self):
+        """Move pending supervisors without touching running molecular processes."""
+        if self._executor_capacity == self.pool_size:
+            return
+        previous = self._executor
+        self._executor = ThreadPoolExecutor(max_workers=self.pool_size, thread_name_prefix='energyhub')
+        self._executor_capacity = self.pool_size
+        for job in self._jobs.values():
+            if job.state == 'queued' and job.future is not None and job.future.cancel():
+                job.future = self._executor.submit(self._execute, job)
+        previous.shutdown(wait=False)
+        self._retired_executors.append(previous)
+
+    def _refresh_resources_locked(self, *, force=False):
+        if self._closed:
+            return
+        if force or time.monotonic() - self._resources_checked_at >= RESOURCE_REFRESH_SECONDS:
+            self._resource_snapshot = memory_resources()
+            self._detected_cpus = available_cpus()
+            self._recommended_memory = default_memory_pool_mb(self._resource_snapshot)
+            self._resources_checked_at = time.monotonic()
+            self._resources_wall_time = time.time()
+        if self.resource_mode == 'auto':
+            old = self.pool_size, self.thread_pool_size, self.memory_pool_mb
+            # A resource drop blocks new starts; it never revokes active leases.
+            self.pool_size = max(self._slots_used, self._detected_cpus)
+            self.thread_pool_size = max(self._threads_used, self._detected_cpus)
+            self.memory_pool_mb = max(self._memory_used, self._recommended_memory)
+            if old != (self.pool_size, self.thread_pool_size, self.memory_pool_mb):
+                self._resize_executor_locked()
+                self._condition.notify_all()
+
+    def config(self, *, refresh=False):
+        with self._condition:
+            self._refresh_resources_locked(force=refresh)
             return {'pool_size': self.pool_size, 'memory_pool_mb': self.memory_pool_mb,
                     'slots_used': self._slots_used, 'memory_used_mb': self._memory_used,
                     'thread_pool_size': self.thread_pool_size, 'thread_used': self._threads_used,
-                    'cpu_count': available_cpus(), 'data_dir': str(self.data_dir), 'python': self.python,
-                    **memory_resources(), 'recommended_memory_pool_mb': default_memory_pool_mb()}
+                    'cpu_count': self._detected_cpus, 'data_dir': str(self.data_dir), 'python': self.python,
+                    **self._resource_snapshot, 'recommended_memory_pool_mb': self._recommended_memory,
+                    'resource_mode': self.resource_mode, 'resource_refresh_seconds': RESOURCE_REFRESH_SECONDS,
+                    'resources_checked_at': self._resources_wall_time,
+                    'resource_pressure': self.resource_mode == 'auto' and (
+                        self._memory_used > self._recommended_memory or self._threads_used > self._detected_cpus),
+                    'memory_unreserved_mb': max(0, self.memory_pool_mb - self._memory_used)}
 
-    def configure(self, *, pool_size=None, memory_pool_mb=None, thread_pool_size=None):
+    def configure(self, *, pool_size=None, memory_pool_mb=None, thread_pool_size=None, resource_mode=None):
         with self._condition:
             if self._closed:
                 raise RuntimeError('Manager is closed')
             if self._slots_used or any(j.state not in TERMINAL_STATES for j in self._jobs.values()):
                 raise RuntimeError('Resource pools can only be changed when all jobs have stopped')
-            slots = self.pool_size if pool_size is None else positive_int(pool_size, 'pool_size')
-            memory = self.memory_pool_mb if memory_pool_mb is None else positive_int(memory_pool_mb, 'memory_pool_mb')
-            threads = self.thread_pool_size if thread_pool_size is None else positive_int(thread_pool_size, 'thread_pool_size')
-            if threads > available_cpus():
-                raise ValueError('thread_pool_size exceeds available logical CPUs')
-            write_json(self.data_dir / 'config.json', dict(pool_size=slots, memory_pool_mb=memory, thread_pool_size=threads))
-            self._executor.shutdown(wait=False, cancel_futures=True)
-            self.pool_size, self.memory_pool_mb, self.thread_pool_size = slots, memory, threads
-            self._executor = ThreadPoolExecutor(max_workers=slots, thread_name_prefix='energyhub')
+            explicit_limits = any(value is not None for value in (pool_size, memory_pool_mb, thread_pool_size))
+            mode = resource_mode if resource_mode is not None else ('manual' if explicit_limits else self.resource_mode)
+            if mode not in ('auto', 'manual'):
+                raise ValueError('resource_mode must be auto or manual')
+            if mode == 'auto' and explicit_limits:
+                raise ValueError('Automatic mode detects resource limits; omit fixed pool limits')
+            self._refresh_resources_locked(force=True)
+            if mode == 'auto':
+                payload = {'resource_mode': 'auto'}
+            else:
+                slots = self.pool_size if pool_size is None else positive_int(pool_size, 'pool_size')
+                memory = self.memory_pool_mb if memory_pool_mb is None else positive_int(memory_pool_mb, 'memory_pool_mb')
+                threads = self.thread_pool_size if thread_pool_size is None else positive_int(thread_pool_size, 'thread_pool_size')
+                if threads > self._detected_cpus:
+                    raise ValueError('thread_pool_size exceeds available logical CPUs')
+                payload = dict(resource_mode='manual', pool_size=slots, memory_pool_mb=memory, thread_pool_size=threads)
+            write_json(self.data_dir / 'config.json', payload)
+            self.resource_mode = mode
+            if mode == 'manual':
+                self.pool_size, self.memory_pool_mb, self.thread_pool_size = slots, memory, threads
+                self._resize_executor_locked()
+            self._refresh_resources_locked()
             return self.config()
 
     def submit(self, tgz_file, ref_file, options):
@@ -231,6 +301,7 @@ class EnergyJobManager:
         with self._condition:
             if self._closed:
                 raise RuntimeError('Manager is closed')
+            self._refresh_resources_locked(force=True)
             if slots > self.pool_size or memory > self.memory_pool_mb:
                 raise ValueError('Job exceeds the configured global pool_size or memory_pool_mb')
             if thread_budget > self.thread_pool_size:
@@ -361,14 +432,15 @@ class EnergyJobManager:
         process, reserved = None, False
         try:
             with self._condition:
-                while (self._slots_used + slots > self.pool_size
-                       or self._memory_used + memory > self.memory_pool_mb
-                       or self._threads_used + threads > self.thread_pool_size):
+                while True:
                     if job.cancel_event.is_set():
                         return
+                    self._refresh_resources_locked()
+                    if (self._slots_used + slots <= self.pool_size
+                            and self._memory_used + memory <= self.memory_pool_mb
+                            and self._threads_used + threads <= self.thread_pool_size):
+                        break
                     self._condition.wait(.1)
-                if job.cancel_event.is_set():
-                    return
                 self._slots_used += slots
                 self._memory_used += memory
                 self._threads_used += threads
@@ -438,6 +510,7 @@ class EnergyJobManager:
                     self._slots_used -= slots
                     self._memory_used -= memory
                     self._threads_used -= threads
+                    self._refresh_resources_locked()
                 try:
                     self._persist(job)
                 except OSError as error:
@@ -475,4 +548,6 @@ class EnergyJobManager:
             for job in self._jobs.values():
                 self.cancel(job.task_id)
         self._executor.shutdown(wait=True, cancel_futures=True)
+        for executor in self._retired_executors:
+            executor.shutdown(wait=True, cancel_futures=True)
         self._directory_lock.close()

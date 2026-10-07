@@ -1,4 +1,4 @@
-"""Portable resource discovery used for initial scheduler budgets."""
+"""Portable resource discovery used for live scheduler budgets."""
 from __future__ import annotations
 import os
 from pathlib import Path
