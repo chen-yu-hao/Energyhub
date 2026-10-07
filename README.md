@@ -183,7 +183,7 @@ curl -F name='H2 reference' \
 python -m pip install build
 python -m build
 # 将 dist 中的 wheel 复制到目标机器，然后：
-python -m pip install 'dfthub_energyhub-0.2.0-py3-none-any.whl[all]'
+python -m pip install 'dfthub_energyhub-0.2.1-py3-none-any.whl[all]'
 energyhub doctor
 energyhub serve --data-dir /path/to/energyhub-data
 ```

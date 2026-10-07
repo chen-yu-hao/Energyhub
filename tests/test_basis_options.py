@@ -2,6 +2,7 @@
 import io
 import json
 import math
+import sys
 from pathlib import Path
 import tarfile
 import tempfile
@@ -69,7 +70,7 @@ class BasisOptionTests(unittest.TestCase):
                 handle.addfile(member,io.BytesIO(geometry))
             reference=root/'atoms.ref';reference.write_text('1 H ? 1\n')
             probe=mock.Mock(returncode=0,stdout=json.dumps({'methods':[{'name':'CCSDT(Q)','closed_shell':True,'open_shell':False,'reason':None}]}))
-            with mock.patch('Energyhub.core.subprocess.run',return_value=probe), mock.patch('Energyhub.core.subprocess.Popen') as worker:
+            with mock.patch('Energyhub.runtime.python_executable',return_value=sys.executable), mock.patch('Energyhub.core.subprocess.run',return_value=probe), mock.patch('Energyhub.core.subprocess.Popen') as worker:
                 with self.assertRaisesRegex(CalculationError,'H: CCSDT\\(Q\\) is unavailable for open shell'):
                     compute_reference(archive,reference,root/'result.ref',method='CCSDT(Q)')
                 worker.assert_not_called()
