@@ -5,7 +5,7 @@ run a complete archive calculation, or use :class:`ReferenceCalculator` when
 the caller needs progress and cancellation hooks.
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 from .core import (
     BASIS_ALIASES,

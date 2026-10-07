@@ -36,7 +36,7 @@ energyhub serve --data-dir ./energyhub-data
 ## 第一次计算
 
 1. 在 **New CC energy task** 中填写任务名称，选择方法和基组。
-2. 上传包含 XYZ 文件的 `.tgz`，以及参考值留空的 `.ref`。
+2. 上传包含 XYZ 文件的 `.tgz`。需要反应参考值时，可同时选择 `.ref`，或在选好归档后点击添加参考模板；不提供模板时计算各结构总能。
 3. 设置线程池、每个分子的线程数和内存预算，点击 **Run calculation**。
 4. 在左侧选择任务查看进度；完成后下载 `.ref`、JSON 报告或 CSV。
 
@@ -117,7 +117,7 @@ energyhub serve \
 - `pool-size`：同时运行的分子数上限。
 - `memory-pool-mb`：所有运行任务共享的内存预约预算。
 
-新任务中的线程池和每分子线程数决定并发数；界面会显示分配预览。调度器同时检查分子数、CPU 线程和内存，不够时排队。全局配置只能在没有活动任务时修改，并保存在数据目录中。
+新任务界面按设计显示 GB 内存步进器和每任务线程分段按钮，提交时自动将 GB 换算成 MB。线程池和每分子线程数决定并发数；界面会显示分配预览。调度器同时检查分子数、CPU 线程和内存，不够时排队。全局配置只能在没有活动任务时修改，并保存在数据目录中。
 
 内存数值最终交给 PySCF 的 `max_memory`；这是工作内存提示，不是操作系统的硬 RSS 限额。机器还需要为 Python、积分和数值库留出额外空间。
 
@@ -183,7 +183,7 @@ curl -F name='H2 reference' \
 python -m pip install build
 python -m build
 # 将 dist 中的 wheel 复制到目标机器，然后：
-python -m pip install 'dfthub_energyhub-0.2.1-py3-none-any.whl[all]'
+python -m pip install 'dfthub_energyhub-0.2.2-py3-none-any.whl[all]'
 energyhub doctor
 energyhub serve --data-dir /path/to/energyhub-data
 ```

@@ -42,7 +42,7 @@ async def main():
         await expect(page.locator('#submitTask')).to_be_enabled()
         await page.screenshot(path=str(OUT/'new-task.png'),full_page=True)
         await page.locator('#submitTask').click()
-        await expect(page.locator('#formError')).to_contain_text('Choose both')
+        await expect(page.locator('#formError')).to_contain_text('Choose a geometry archive')
         await page.locator('label:has(input[name="method"][value="CCSDT(Q)"])').click()
         await expect(page.locator('#methodNotice')).to_contain_text('closed-shell')
         await page.locator('label:has(input[name="basis"][value="CBS"])').click()
@@ -52,14 +52,15 @@ async def main():
         await page.locator('label:has(input[name="method"][value="CCSD(T)"])').click()
         await page.locator('label:has(input[name="basis"][value="3zeta"])').click()
         await page.locator('label:has(input[name="basis_family"][value="cc"])').click()
+        await page.locator('a[data-nav="guide"]').click()
         await page.locator('#loadSample').click()
         await expect(page.locator('#archiveFileLabel')).to_contain_text('H2.tgz')
         title='Browser H₂ validation '+str(int(time.time()))
         await page.locator('#taskName').fill(title)
         await page.locator('#threadBudget').fill('2')
-        await page.locator('#taskThreads').fill('1')
-        await page.locator('#memoryPool').fill('1024')
-        await expect(page.locator('#allocationSummary')).to_contain_text('2 at a time')
+        await page.locator('label:has(input[name="task_threads_choice"][value="1"])').click()
+        await page.locator('#memoryPool').fill('1')
+        await expect(page.locator('#allocationSummary')).to_contain_text('2 tasks at a time')
         await page.locator('#submitTask').click()
         await expect(page).to_have_url(__import__('re').compile(r'.*#task/[a-f0-9]{32}$'))
         identifier=page.url.rsplit('/',1)[-1]
@@ -74,6 +75,9 @@ async def main():
                 await page.locator(selector).click()
             await (await download.value).save_as(OUT/name)
         report=json.loads((OUT/'report.json').read_text())
+        assert report['settings']['memory_pool_mb'] == 1024, report['settings']
+        assert report['settings']['pool_size'] == 2, report['settings']
+        assert report['settings']['task_threads'] == 1, report['settings']
         values={row['name']:row['energy_hartree'] for row in report['molecularEnergies']}
         output=float((OUT/'completed.ref').read_text().split()[-2])
         assert abs(output-(values['H2_stretched']-values['H2'])*627.509)<1e-8
@@ -94,10 +98,9 @@ async def main():
         await expect(page.locator('#settingsDialog')).not_to_be_visible()
         await page.locator('#newTaskLink').click()
         await page.locator('#threadBudget').fill('1')
-        await page.locator('#memoryPool').fill('512')
+        await page.locator('#memoryPool').fill('1')
         await page.locator('#taskName').fill('Browser cancellation test')
         await page.locator('#archiveFile').set_input_files({'name':'cancel.tgz','mimeType':'application/gzip','buffer':geometry_archive()})
-        await page.locator('#referenceFile').set_input_files({'name':'cancel.ref','mimeType':'text/plain','buffer':b''})
         await page.locator('#submitTask').click()
         await expect(page.locator('#cancelTask')).to_be_visible()
         await page.locator('#cancelTask').click()

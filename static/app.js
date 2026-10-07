@@ -26,7 +26,7 @@
     const cardinal = { '3zeta': 'T', '4zeta': 'Q', '5zeta': '5' }[value.toLowerCase()];
     return cardinal ? `${prefix}cc-pV${cardinal}Z` : value || '—';
   };
-  const modelLabel = job => `${job.method} / ${basisLabel(job.basis, job.basis_family, job.cbs_pair)}`;
+  const modelLabel = job => `${job.method}/${basisLabel(job.basis, job.basis_family, job.cbs_pair)}`;
   function showError(id, error) { $(id).textContent = error || ''; $(id).hidden = !error; }
   let toastTimer;
   function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4500); }
@@ -48,9 +48,9 @@
   function chosenSettings() {
     const threadBudget = integer('threadBudget');
     const parallel = $('parallelEnabled').checked;
-    const threads = parallel ? integer('taskThreads') : threadBudget;
+    const threads = parallel ? Math.min(integer('taskThreads'), threadBudget) : threadBudget;
     const slots = parallel ? Math.max(1, Math.floor(threadBudget / threads)) : 1;
-    return { method: selected('method'), basis: selected('basis'), basis_family: selected('basis_family'), cbs_pair: selected('cbs_pair'), local_method: 'canonical', pool_size: slots, task_threads: threads, thread_budget: threadBudget, memory_pool_mb: integer('memoryPool') };
+    return { method: selected('method'), basis: selected('basis'), basis_family: selected('basis_family'), cbs_pair: selected('cbs_pair'), local_method: 'canonical', pool_size: slots, task_threads: threads, thread_budget: threadBudget, memory_pool_mb: Math.round(integer('memoryPool') * 1024) };
   }
   function validSettings(options) {
     for (const [key, value] of Object.entries(options)) if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 1)) return 'Resource values must be positive whole numbers.';
@@ -64,29 +64,46 @@
     }
     return null;
   }
+  function formatGB(megabytes) { return (megabytes / 1024).toLocaleString(undefined, { maximumFractionDigits: 3 }); }
+  function syncThreadChoices() {
+    const value = $('taskThreads').value;
+    document.querySelectorAll('.custom-thread-choice').forEach(label => label.remove());
+    if (!form.querySelector(`input[name="task_threads_choice"][value="${Number(value)}"]`) && Number.isSafeInteger(Number(value)) && Number(value) > 0) {
+      const label = document.createElement('label'); label.className = 'segment-choice custom-thread-choice';
+      const input = document.createElement('input'); input.type = 'radio'; input.name = 'task_threads_choice'; input.value = value;
+      const text = document.createElement('span'); text.textContent = value;
+      label.append(input, text); document.querySelector('.thread-segments').append(label);
+    }
+    setRadio('task_threads_choice', value);
+  }
   function updateForm() {
     const options = chosenSettings();
     const isCBS = options.basis === 'CBS';
+    const parallel = $('parallelEnabled').checked;
     $('fullLabel').textContent = modelLabel(options);
+    $('basisLabel').textContent = basisLabel(options.basis, options.basis_family, options.cbs_pair);
     $('cbsInfo').hidden = !isCBS;
     $('cbsPairChoices').hidden = !isCBS;
-    $('cbsPairLabel').textContent = options.cbs_pair === '45' ? '4ζ → 5ζ' : '3ζ → 4ζ';
-    $('cbsBasisDescription').textContent = `Each structure is calculated at ${options.cbs_pair === '45' ? '4ζ and 5ζ' : '3ζ and 4ζ'}.`;
-    for (const card of document.querySelectorAll('.basis-card')) {
-      const input = card.querySelector('input');
-      if (input.value !== 'CBS') card.querySelector('.option-foot').textContent = basisLabel(input.value, options.basis_family);
-    }
-    $('parallelState').textContent = $('parallelEnabled').checked ? 'On' : 'Off';
-    $('taskThreads').disabled = !$('parallelEnabled').checked;
-    if (!$('parallelEnabled').checked && Number.isFinite(options.thread_budget)) $('taskThreads').value = options.thread_budget;
-    document.querySelectorAll('[data-step^="taskThreads:"]').forEach(button => { button.disabled = !$('parallelEnabled').checked; });
+    const pair = options.cbs_pair === '45' ? '4ζ and 5ζ' : '3ζ and 4ζ';
+    $('cbsBasisDescription').textContent = `Correlation energy is extrapolated from the ${pair} results; the HF component is extrapolated separately. Each structure runs at both basis sets.`;
+    $('parallelState').textContent = parallel ? 'On' : 'Off';
+    $('threadsPerTaskRow').hidden = !parallel;
+    $('parallelHelp').textContent = parallel
+      ? 'Structures run as separate tasks that share one thread pool and one memory pool. Each task gets a fixed number of threads; memory is split evenly between running tasks.'
+      : 'Structures run one after another, each using the whole thread pool and memory pool.';
+    syncThreadChoices();
+    for (const id of ['threadBudget', 'memoryPool']) $(id).style.setProperty('--digits', Math.max(1, $(id).value.length));
     const safe = Number.isFinite(options.pool_size) && Number.isFinite(options.task_threads) && options.task_threads > 0;
     const slots = safe ? options.pool_size : 0;
     const perMemory = slots ? Math.floor(options.memory_pool_mb / slots) : 0;
     const idle = safe ? Math.max(0, options.thread_budget - slots * options.task_threads) : 0;
-    $('allocationSummary').innerHTML = `<span><strong>${slots || '—'}</strong> at a time</span><span><strong>${safe ? options.task_threads : '—'}</strong> threads each</span><span><strong>${Number.isFinite(perMemory) ? perMemory.toLocaleString() : '—'}</strong> MB each</span>${idle ? `<span><strong>${idle}</strong> threads idle</span>` : ''}`;
-    $('allocationLanes').innerHTML = Array.from({ length: Math.min(slots, 8) }, (_, i) => `<span>Structure ${i + 1} · ${options.task_threads}t</span>`).join('') + (slots > 8 ? `<span>+${slots - 8} more</span>` : '');
-    $('footerSummary').textContent = `${isCBS ? '2 basis sets · ' : ''}${slots || '—'} structure${slots === 1 ? '' : 's'} at a time`;
+    $('allocationSummary').innerHTML = `<span><strong>${slots || '—'}</strong> ${slots === 1 ? 'task' : 'tasks'} at a time</span><span><strong>${safe ? options.task_threads : '—'}</strong> threads each</span><span><strong>${Number.isFinite(perMemory) ? formatGB(perMemory) : '—'}</strong> GB memory each</span><span><strong>${idle}</strong> threads idle</span>`;
+    $('allocationLanes').innerHTML = Array.from({ length: Math.min(slots, 32) }, (_, i) => `<span>Task ${i + 1} · ${options.task_threads}t</span>`).join('') + (slots > 32 ? `<span>+${slots - 32} more</span>` : '') + (idle ? `<span class="idle">${idle} idle</span>` : '');
+    $('footerSummary').textContent = `${isCBS ? '2 basis sets per structure · ' : ''}${slots || '—'} ${slots === 1 ? 'task' : 'tasks'} at a time · ${safe ? options.task_threads : '—'} threads, ${Number.isFinite(perMemory) ? formatGB(perMemory) : '—'} GB each`;
+    let warning = validSettings(options);
+    if (!warning && parallel && integer('taskThreads') > options.thread_budget) warning = `Threads per task is larger than the pool, so each task is capped at ${options.thread_budget} threads.`;
+    else if (!warning && idle > 0) warning = `${idle} threads in the pool are not used. Pick a thread count per task that divides the pool evenly.`;
+    showError('allocationWarning', warning);
     const capability = state.capabilities?.methods?.find(item => item.name === options.method);
     let notice = '';
     if (capability && !capability.available) notice = capability.reason || 'This method is unavailable in the configured PySCF environment.';
@@ -100,7 +117,7 @@
       const capability = state.capabilities.methods.find(item => item.name === input.value);
       input.disabled = !capability?.available;
       input.closest('.option-card').title = capability?.reason || '';
-      document.querySelector(`[data-method-status="${input.value}"]`).textContent = capability?.available ? (capability.open_shell ? 'Closed & open shell' : 'Closed shell only') : 'Unavailable';
+      document.querySelector(`[data-method-status="${input.value}"]`).textContent = capability?.available ? 'Canonical only' : 'Unavailable';
     }
     if (form.querySelector('input[name="method"]:checked')?.disabled) {
       const available = form.querySelector('input[name="method"]:not(:disabled)');
@@ -120,11 +137,15 @@
     const config = state.config;
     $('threadBudget').max = config.thread_pool_size || config.cpu_count || Number.MAX_SAFE_INTEGER;
     $('taskThreads').max = config.cpu_count || config.thread_pool_size || Number.MAX_SAFE_INTEGER;
-    $('memoryPool').max = config.memory_pool_mb;
+    $('memoryPool').max = config.memory_pool_mb / 1024;
+    $('memoryPool').min = Math.min(1, config.memory_pool_mb / 1024);
     $('globalPoolSummary').textContent = `Server pool: ${config.thread_pool_size ?? config.cpu_count ?? '—'} CPU threads · ${config.pool_size} concurrent slots · ${config.memory_pool_mb.toLocaleString()} MB. In use: ${config.slots_used} slots, ${config.memory_used_mb.toLocaleString()} MB.`;
     if (state.initial) {
-      $('threadBudget').value = Math.max(1, Math.min(config.pool_size, config.thread_pool_size || config.cpu_count || 1));
-      $('memoryPool').value = Math.min(4096, config.memory_pool_mb);
+      const threadLimit = config.thread_pool_size || config.cpu_count || 1;
+      const preferred = [1, 2, 4, 8].filter(value => value <= threadLimit).pop() || 1;
+      $('taskThreads').value = preferred;
+      $('threadBudget').value = Math.max(1, Math.min(64, threadLimit, config.pool_size * preferred));
+      $('memoryPool').value = Math.min(256, config.memory_pool_mb / 1024);
     }
   }
   function savePreset() {
@@ -136,7 +157,7 @@
       const preset = JSON.parse(localStorage.getItem('energyhub.preset.v1') || 'null');
       if (!preset || typeof preset !== 'object') return;
       for (const field of ['method', 'basis', 'basis_family', 'cbs_pair']) if (preset[field]) setRadio(field, preset[field]);
-      for (const [id, key] of [['threadBudget', 'thread_budget'], ['taskThreads', 'per_structure_threads'], ['memoryPool', 'memory_pool_mb']]) if (Number.isSafeInteger(preset[key]) && preset[key] > 0) $(id).value = Math.min(preset[key], Number($(id).max) || Infinity);
+      for (const [id, key] of [['threadBudget', 'thread_budget'], ['taskThreads', 'per_structure_threads'], ['memoryPool', 'memory_pool_mb']]) if (Number.isSafeInteger(preset[key]) && preset[key] > 0) $(id).value = Math.min(id === 'memoryPool' ? preset[key] / 1024 : preset[key], Number($(id).max) || Infinity);
       if (typeof preset.parallel === 'boolean') $('parallelEnabled').checked = preset.parallel;
     } catch (_) { /* A corrupt or unavailable preference store must not block work. */ }
   }
@@ -150,19 +171,22 @@
     label.textContent = `${file.name} · ${file.size < 1024 ? `${file.size} B` : file.size < 1048576 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / 1048576).toFixed(1)} MB`}`;
     document.querySelector(`[data-upload="${kind}"]`).classList.add('has-file');
     document.querySelector(`[data-remove="${kind}"]`).hidden = false;
+    $('referenceOptions').hidden = false;
     showError('formError', '');
   }
   function removeFile(kind) {
     state.files[kind] = null;
     $(kind === 'tgz' ? 'archiveFile' : 'referenceFile').value = '';
-    $(kind === 'tgz' ? 'archiveFileLabel' : 'referenceFileLabel').textContent = kind === 'tgz' ? 'Drop .tgz / .tar.gz or browse' : 'Drop .ref or browse';
+    $(kind === 'tgz' ? 'archiveFileLabel' : 'referenceFileLabel').textContent = kind === 'tgz' ? 'Drop a .tgz of .xyz files here, or click to choose. Line 2 of each .xyz holds charge and spin multiplicity.' : 'Add reference template (.ref)';
     document.querySelector(`[data-upload="${kind}"]`).classList.remove('has-file');
     document.querySelector(`[data-remove="${kind}"]`).hidden = true;
+    $('referenceOptions').hidden = !state.files.tgz && !state.files.ref;
   }
   function renderHistory() {
     const query = $('taskSearch').value.trim().toLowerCase();
     const jobs = state.jobs.filter(job => `${title(job)} ${job.dataset || ''} ${job.task_id} ${job.method}`.toLowerCase().includes(query));
     $('taskCount').textContent = `${state.total} ${state.total === 1 ? 'task' : 'tasks'}`;
+    $('taskName').placeholder = `CC energy ${state.total + 1}`;
     $('taskList').innerHTML = jobs.length ? jobs.map(job => `<a class="task-link${state.taskId === job.task_id ? ' selected' : ''}" href="#task/${encodeURIComponent(job.task_id)}"${state.taskId === job.task_id ? ' aria-current="page"' : ''}><span class="task-link-top"><span class="task-name">${escape(title(job))}</span><span class="task-date">${escape(date(job.created_at))}</span></span><div class="task-method">${escape(modelLabel(job))}</div><div class="task-status"><span class="status-dot ${escape(job.state)}"></span>${escape(statusLabel(job.state))}</div></a>`).join('') : `<p class="empty-sidebar">${query ? 'No matching tasks.' : 'Your calculations will appear here.<br>Create your first task to get started.'}</p>`;
     if (state.total > state.jobs.length) $('taskList').insertAdjacentHTML('beforeend', '<button type="button" id="loadMoreTasks" class="button button-soft">Load more tasks</button>');
     $('newTaskLink').classList.toggle('selected', state.page === 'new');
@@ -230,7 +254,7 @@
     renderHistory();
     if (state.page === 'results') renderResults();
     if (state.page === 'task') { $('jobContent').innerHTML = '<p class="muted">Loading task…</p>'; loadJob(); }
-    document.title = `${state.page === 'guide' ? 'Guide' : state.page === 'results' ? 'Results' : state.page === 'task' ? 'Task' : 'New task'} · CC energy`;
+    document.title = `CC energy — ${state.page === 'guide' ? 'guide' : state.page === 'results' ? 'results' : state.page === 'task' ? 'task' : 'new task'}`;
   }
   async function refresh() {
     if (state.refreshing) return;
@@ -262,6 +286,7 @@
       setFile('tgz', new File([blobs[0]], 'H2.tgz', { type: 'application/gzip' }));
       setFile('ref', new File([blobs[1]], 'H2.ref', { type: 'text/plain' }));
       if (!$('taskName').value.trim()) $('taskName').value = 'H₂ reference example';
+      location.hash = 'new';
       toast('Example files loaded. Review your settings, then select Run CC energy.');
     } catch (error) { showError('formError', error.message); }
     finally { button.disabled = false; }
@@ -270,14 +295,15 @@
     event.preventDefault();
     if (state.busy) return;
     showError('formError', '');
-    if (!state.files.tgz || !state.files.ref) { showError('formError', 'Choose both a geometry archive and a .ref template. The reference file may be empty.'); return; }
+    if (!state.files.tgz) { showError('formError', 'Choose a geometry archive before starting the calculation.'); return; }
+    const reference = state.files.ref || new File([], state.files.tgz.name.replace(/\.(tgz|tar\.gz)$/i, '.ref'), { type: 'text/plain' });
     const options = chosenSettings();
     const issue = validSettings(options);
     if (issue) { showError('formError', issue); return; }
-    if (state.config?.max_upload_bytes && state.files.tgz.size + state.files.ref.size + 4096 > state.config.max_upload_bytes) { showError('formError', 'The combined files exceed the server upload limit.'); return; }
+    if (state.config?.max_upload_bytes && state.files.tgz.size + reference.size + 4096 > state.config.max_upload_bytes) { showError('formError', 'The combined files exceed the server upload limit.'); return; }
     const data = new FormData();
     data.append('tgz', state.files.tgz);
-    data.append('ref', state.files.ref);
+    data.append('ref', reference);
     data.append('name', $('taskName').value.trim());
     for (const [key, value] of Object.entries(options)) data.append(key, String(value));
     state.busy = true;
@@ -293,7 +319,7 @@
       removeFile('tgz'); removeFile('ref');
       await refresh();
     } catch (error) { showError('formError', error.message); }
-    finally { state.busy = false; $('submitTask').innerHTML = 'Run CC energy <span aria-hidden="true">→</span>'; updateForm(); }
+    finally { state.busy = false; $('submitTask').textContent = 'Run CC energy'; updateForm(); }
   }
   async function cancelTask(button) {
     const job = state.job;
@@ -308,7 +334,7 @@
     for (const field of ['method', 'basis', 'basis_family', 'cbs_pair']) if (job[field]) setRadio(field, job[field]);
     $('threadBudget').value = job.thread_budget || job.pool_size * job.task_threads;
     $('taskThreads').value = job.task_threads;
-    $('memoryPool').value = job.memory_pool_mb;
+    $('memoryPool').value = job.memory_pool_mb / 1024;
     $('parallelEnabled').checked = job.pool_size > 1;
     $('taskName').value = `${title(job)} — repeat`.slice(0, 120);
     updateForm(); location.hash = 'new'; toast('Settings copied. Choose the archive and reference files to run again.');
@@ -351,14 +377,9 @@
     } catch (error) { showError('settingsError', error.message); }
     finally { $('saveSettings').disabled = false; }
   }
-  let previousParallelThreads = 1;
-  $('parallelEnabled').addEventListener('change', () => {
-    if ($('parallelEnabled').checked) $('taskThreads').value = Math.min(previousParallelThreads, integer('threadBudget'));
-    else previousParallelThreads = integer('taskThreads') || 1;
-  });
   form.addEventListener('submit', submit);
-  form.addEventListener('input', updateForm);
-  form.addEventListener('change', updateForm);
+  form.addEventListener('input', event => { if (event.target.name === 'task_threads_choice') $('taskThreads').value = event.target.value; updateForm(); });
+  form.addEventListener('change', event => { if (event.target.name === 'task_threads_choice') $('taskThreads').value = event.target.value; updateForm(); });
   $('savePreset').addEventListener('click', savePreset);
   $('openSettings').addEventListener('click', openSettings);
   $('closeSettings').addEventListener('click', () => $('settingsDialog').close());
@@ -366,12 +387,27 @@
   $('settingsForm').addEventListener('submit', saveSettings);
   $('taskSearch').addEventListener('input', () => { renderHistory(); clearTimeout(state.searchTimer); state.searchTimer = setTimeout(refresh, 300); });
   window.addEventListener('hashchange', route);
+  function receiveFiles(files, destination) {
+    const list = Array.from(files);
+    if (!list.length) return;
+    if (destination === 'ref') {
+      if (list.length !== 1) { showError('formError', 'Choose one reference template.'); return; }
+      setFile('ref', list[0]); return;
+    }
+    const archives = list.filter(file => /\.(tgz|tar\.gz)$/i.test(file.name));
+    const references = list.filter(file => /\.ref$/i.test(file.name));
+    if (archives.length > 1 || references.length > 1 || archives.length + references.length !== list.length) {
+      showError('formError', 'Choose one .tgz archive and, optionally, one .ref template.'); return;
+    }
+    if (archives[0]) setFile('tgz', archives[0]);
+    if (references[0]) setFile('ref', references[0]);
+  }
   for (const [kind, id] of [['tgz', 'archiveFile'], ['ref', 'referenceFile']]) {
-    $(id).addEventListener('change', () => { if ($(id).files[0]) setFile(kind, $(id).files[0]); });
+    $(id).addEventListener('change', () => receiveFiles($(id).files, kind));
     const drop = document.querySelector(`[data-upload="${kind}"]`);
     drop.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('dragover'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
-    drop.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('dragover'); if (event.dataTransfer.files.length !== 1) { showError('formError', 'Drop one file into each upload area.'); return; } setFile(kind, event.dataTransfer.files[0]); });
+    drop.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('dragover'); receiveFiles(event.dataTransfer.files, kind); });
   }
   document.addEventListener('click', event => {
     const button = event.target.closest('button');
