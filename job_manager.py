@@ -297,7 +297,10 @@ class EnergyJobManager:
         ref_name = upload_filename(ref_file, 'input.ref')
         dataset_default = re.sub(r'(?i)\.(tar\.gz|tgz|zip)$', '', archive_name)[:160] or 'dataset'
         dataset = display_name(options.get('dataset'), 'dataset', dataset_default)
-        name = display_name(options.get('name'), 'name', dataset)
+        name_value = options.get('name')
+        if isinstance(name_value, str) and not name_value.strip():
+            name_value = None
+        name = display_name(name_value, 'name', dataset)
         with self._condition:
             if self._closed:
                 raise RuntimeError('Manager is closed')

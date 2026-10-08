@@ -36,6 +36,16 @@ class FrontendApiTests(ManagerCase):
         self.assertEqual(response.data[:2],b'\x1f\x8b')
         response.close()
 
+    def test_blank_task_names_default_to_archive_name(self):
+        for value in ('', '   ', None):
+            with self.subTest(name=value):
+                options = {} if value is None else {'name': value}
+                response = self.post(**options)
+                self.assertEqual(response.status_code, 202, response.get_json())
+                job = self.terminal(self.manager.get(response.get_json()['task_id']))
+                self.assertEqual(job.name, 'water cluster')
+                self.assertEqual(job.state, 'completed')
+
     def test_task_names_history_search_and_download_survive_restart(self):
         response = self.post(name='水簇的参考能', dataset='WATER27')
         self.assertEqual(response.status_code, 202, response.get_json())

@@ -322,7 +322,7 @@
     const data = new FormData();
     data.append('tgz', state.files.tgz);
     data.append('ref', reference);
-    data.append('name', $('taskName').value.trim());
+    data.append('name', $('taskName').value.trim() || $('taskName').placeholder);
     for (const [key, value] of Object.entries(options)) data.append(key, String(value));
     state.busy = true;
     $('submitTask').textContent = 'Submitting…';
