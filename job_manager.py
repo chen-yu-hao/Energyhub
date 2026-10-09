@@ -470,6 +470,10 @@ class EnergyJobManager:
                     if progress_file.exists():
                         with self._lock:
                             job.progress = json.loads(progress_file.read_text())
+                progress_file = job.directory / 'progress.json'
+                if progress_file.exists():
+                    with self._lock:
+                        job.progress = json.loads(progress_file.read_text())
                 if not job.cancel_event.is_set():
                     if process is None or not result_path.exists():
                         raise RuntimeError(f'Worker failed before reporting results (exit {process.returncode if process else None}); see process.log')
@@ -481,7 +485,7 @@ class EnergyJobManager:
                         raise RuntimeError('Calculator did not create a complete .ref file')
                     with self._lock:
                         job.report = report
-                        job.progress = {'status': 'complete', 'completed': len(report.get('molecularEnergies', []))}
+                        job.progress = {**(job.progress or {}), 'status': 'complete', 'completed': len(report.get('molecularEnergies', []))}
         except Exception as error:
             with self._lock:
                 job.error = str(error)
@@ -509,6 +513,10 @@ class EnergyJobManager:
                     except OSError as error:
                         job.error = (job.error or '') + f'; Scratch cleanup failed: {error}'
                 job.finished_at = time.time()
+                if isinstance(job.progress, dict):
+                    for worker in job.progress.get('workers', []):
+                        if worker.get('state') not in TERMINAL_STATES:
+                            worker.update(state=job.state, stage=job.state.capitalize(), finished_at=job.finished_at)
                 if reserved:
                     self._slots_used -= slots
                     self._memory_used -= memory

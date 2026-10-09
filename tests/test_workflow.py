@@ -37,10 +37,10 @@ class WorkflowTests(unittest.TestCase):
         self.output = self.root / 'complete.ref'
 
     def test_real_ccsdt_parallel_ref_and_molecular_provenance(self):
-        progress = []
+        progress, logs = [], []
         report = compute_reference(self.archive, self.reference, self.output,
             method='CCSDT', basis='3zeta', pool_size=2, task_threads=1,
-            memory_pool_mb=1024, progress=progress.append)
+            memory_pool_mb=1024, progress=progress.append, log_callback=logs.append)
         self.assertTrue(report.complete)
         values = {row.name: row.energy_hartree for row in report.results}
         fields = self.output.read_text().split()
@@ -49,6 +49,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(all(row.details['converged'] for row in report.results))
         self.assertTrue(any(row.get('completed') == 2 for row in progress))
         self.assertIn('?', self.reference.read_text())
+        workers = progress[-1]['workers']
+        self.assertEqual(len(workers), 2)
+        self.assertTrue(all(row['state'] == 'completed' and row['pid'] > 0 for row in workers))
+        self.assertTrue(any(row.get('state') == 'running' for event in progress for row in event.get('workers', [])))
+        self.assertTrue(any('SCF' in line for line in logs))
+        self.assertTrue(any('CCSDT' in line for line in logs))
+        self.assertTrue(any('Completed:' in line for line in logs))
 
     def test_cbs_extrapolates_components_independently(self):
         exact_hf, exact_corr, alpha = -1.0, -.3, 1.63
@@ -163,6 +170,12 @@ class WorkflowTests(unittest.TestCase):
             time.sleep(.1)
         self.assertEqual(status['state'], 'completed', status)
         report = status['report']
+        workers = status['progress']['workers']
+        self.assertEqual(len(workers), 2)
+        self.assertTrue(all(worker['state'] == 'completed' and worker['basis'] == 'cc-pvqz' for worker in workers))
+        logs = client.get(url + '/log?lines=1000').get_json()['text']
+        self.assertIn('cc-pvqz: SCF', logs)
+        self.assertIn('Reference file completed', logs)
         values = {row['name']: row['energy_hartree'] for row in report['molecularEnergies']}
         download = client.get(url + '/result')
         self.addCleanup(download.close)

@@ -69,6 +69,10 @@ async def main():
         await expect(page.locator('#jobTitle')).to_have_text(title)
         await expect(page.locator('#jobContent')).to_contain_text('Molecular energies')
         await expect(page.locator('#jobContent')).to_contain_text('Reference values',timeout=15000)
+        await expect(page.locator('#jobContent')).to_contain_text('Structure processes')
+        await page.locator('#showTaskLog').click()
+        await expect(page.locator('#taskLog')).to_contain_text('Reference file completed')
+        await expect(page.locator('#taskLog')).to_contain_text('CCSD')
         await page.screenshot(path=str(OUT/'completed-task.png'),full_page=True)
         for selector,name in [('#downloadReference','completed.ref'),('#downloadReport','report.json'),('#downloadCSV','energies.csv')]:
             async with page.expect_download() as download:

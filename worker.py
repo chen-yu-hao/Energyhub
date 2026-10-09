@@ -44,7 +44,10 @@ def main():
             molecule = _read_xyz(Path(request['xyz']))
             opts = request['settings']
             def run(basis):
-                return _cc_energy(molecule, opts['method'], basis, opts['memory_mb'], opts['task_threads'], None)
+                def observer(stage):
+                    write_json(result_path.parent / 'status.json', {'stage': stage, 'basis': basis})
+                    print(f'{basis}: {stage}', flush=True)
+                return _cc_energy(molecule, opts['method'], basis, opts['memory_mb'], opts['task_threads'], None, observer=observer)
             if opts['basis'] == 'CBS':
                 pair, family = opts.get('cbs_pair', '34'), opts.get('basis_family', 'cc')
                 lower, upper = basis_pair(pair, family)
@@ -55,8 +58,10 @@ def main():
             from .core import compute_reference
             def progress(value):
                 write_json(result_path.parent / 'progress.json', value)
+            print('Preparing reference calculation', flush=True)
             report = compute_reference(request['tgz'], request['ref'], request['output'],
-                                       progress=progress, **request['options'])
+                                       progress=progress, log_callback=lambda line: print(line, flush=True), **request['options'])
+            print('Reference file completed', flush=True)
             result = report.to_dict()
         else:
             raise ValueError('Unknown worker mode')

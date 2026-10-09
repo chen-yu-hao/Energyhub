@@ -542,7 +542,7 @@ def _finite_energy(value: Any, label: str, molecule_name: str) -> float:
     return result
 
 
-def _cc_energy(molecule: Molecule, method: str, basis_name: str, memory_mb: int, threads: int, cancel_event: Any) -> dict[str, Any]:
+def _cc_energy(molecule: Molecule, method: str, basis_name: str, memory_mb: int, threads: int, cancel_event: Any, observer=None) -> dict[str, Any]:
     """Run exactly the requested method and return auditable energy parts."""
 
     if _cancelled(cancel_event):
@@ -568,7 +568,7 @@ def _cc_energy(molecule: Molecule, method: str, basis_name: str, memory_mb: int,
             "basis": basis,
             "charge": molecule.charge,
             "spin": molecule.multiplicity - 1,
-            "verbose": 0,
+            "verbose": 4 if observer else 0,
             "max_memory": memory_mb,
         }
         if ecp is not None:
@@ -583,6 +583,8 @@ def _cc_energy(molecule: Molecule, method: str, basis_name: str, memory_mb: int,
             if _cancelled(cancel_event):
                 raise CalculationCancelled()
 
+        if observer:
+            observer("SCF")
         mf.callback = stop_scf
         mf.kernel()
         if _cancelled(cancel_event):
@@ -600,6 +602,8 @@ def _cc_energy(molecule: Molecule, method: str, basis_name: str, memory_mb: int,
         runner.conv_tol_normt = 1e-7
         runner.max_cycle = 100
         runner.callback = stop_scf
+        if observer:
+            observer(factory_name)
         runner.kernel()
         if _cancelled(cancel_event):
             raise CalculationCancelled()
@@ -608,8 +612,12 @@ def _cc_energy(molecule: Molecule, method: str, basis_name: str, memory_mb: int,
         correlation = _finite_energy(getattr(runner, "e_corr", None), f"{factory_name} correlation energy", molecule.name)
         correction = 0.0
         if method == "CCSD(T)":
+            if observer:
+                observer("(T) correction")
             correction = _finite_energy(runner.ccsd_t(), "(T) correction", molecule.name)
         elif method == "CCSDT(Q)":
+            if observer:
+                observer("(Q) correction")
             # PySCF 2.14 returns ([Q], (Q)). The second element is already
             # the full (Q) correction; adding both would double-count [Q].
             try:
@@ -639,9 +647,10 @@ def _cc_energy(molecule: Molecule, method: str, basis_name: str, memory_mb: int,
 class ReferenceCalculator:
     """Calculate independent molecules in isolated, terminable PySCF processes."""
 
-    def __init__(self, settings=None, *, progress=None, progress_callback=None):
+    def __init__(self, settings=None, *, progress=None, progress_callback=None, log_callback=None):
         self.settings = settings or CalculationSettings()
         self.progress = progress or progress_callback
+        self.log_callback = log_callback
 
     def _emit(self, value):
         if self.progress:
@@ -679,7 +688,27 @@ class ReferenceCalculator:
             if missing:
                 raise CalculationError("Reference molecules missing from archive: " + ", ".join(sorted(missing)))
             molecules = [m for m in molecules if m.name in needed]
-            self._emit({"status": "running", "total": len(molecules), "completed": 0})
+            monitor_lock = threading.RLock()
+            workers = [{"name": m.name, "state": "queued", "pid": None,
+                        "stage": "Waiting", "basis": self.settings.basis,
+                        "threads": self.settings.task_threads, "memory_mb": self.settings.memory_mb}
+                       for m in molecules]
+
+            def publish(index=None, **changes):
+                with monitor_lock:
+                    if index is not None:
+                        workers[index].update(changes)
+                    self._emit({"status": "running", "total": len(molecules),
+                                "completed": sum(row["state"] == "completed" for row in workers),
+                                "workers": [dict(row) for row in workers],
+                                "molecule": report.results[-1].to_dict() if report.results else None})
+
+            def log_line(name, text):
+                if self.log_callback:
+                    with monitor_lock:
+                        self.log_callback(f"[{name}] {text}")
+
+            publish()
             interpreter = python_executable()
             # Check every reference's spin support before starting expensive work.
             probe = subprocess.run(
@@ -704,14 +733,40 @@ class ReferenceCalculator:
                 work.mkdir()
                 request_path, result_path = work / "request.json", work / "result.json"
                 request_path.write_text(json.dumps({"xyz": str(molecule.path), "settings": asdict(self.settings)}))
-                with (work / "pyscf.log").open("w") as log:
+                log_path = work / "pyscf.log"
+                with log_path.open("w") as log, log_path.open("r", errors="replace") as reader:
+                    pending_log = ""
+
+                    def drain_log(final=False):
+                        nonlocal pending_log
+                        while True:
+                            chunk = reader.read(65536)
+                            if not chunk:
+                                break
+                            lines = (pending_log + chunk).split("\n")
+                            pending_log = lines.pop()
+                            for line in lines:
+                                log_line(molecule.name, line)
+                        if final and pending_log:
+                            log_line(molecule.name, pending_log)
+                            pending_log = ""
+
                     process = subprocess.Popen(
-                        [interpreter, "-m", "Energyhub.worker", "molecule", str(request_path), str(result_path)],
+                        [interpreter, "-u", "-m", "Energyhub.worker", "molecule", str(request_path), str(result_path)],
                         env=worker_environment(self.settings.task_threads, work), cwd=work,
                         stdout=log, stderr=subprocess.STDOUT,
                     )
+                    publish(index, state="running", pid=process.pid, stage="Starting", started_at=time.time())
+                    log_line(molecule.name, f"Started PID {process.pid}; {self.settings.task_threads} threads; {self.settings.memory_mb} MB")
+                    last_update = 0
                     try:
                         while process.poll() is None:
+                            drain_log()
+                            if time.monotonic() - last_update >= .5:
+                                status_path = work / "status.json"
+                                status = json.loads(status_path.read_text()) if status_path.exists() else {}
+                                publish(index, **status)
+                                last_update = time.monotonic()
                             if stopped.is_set() or _cancelled(cancel_event):
                                 raise CalculationCancelled("Calculation cancelled")
                             time.sleep(0.05)
@@ -726,10 +781,23 @@ class ReferenceCalculator:
                         energy = float(details["energy_hartree"])
                         if not math.isfinite(energy):
                             raise CalculationError(f"{molecule.name}: non-finite energy")
+                        status_path = work / "status.json"
+                        if status_path.exists():
+                            publish(index, **json.loads(status_path.read_text()))
+                        drain_log(final=True)
+                        publish(index, state="completed", stage="Completed", finished_at=time.time())
+                        log_line(molecule.name, f"Completed: {energy:.12f} hartree")
                         return MoleculeResult(molecule.name, energy, self.settings.basis, self.settings.method,
                                               time.monotonic() - start, details=details)
+                    except BaseException as error:
+                        cancelled = isinstance(error, CalculationCancelled)
+                        publish(index, state="cancelled" if cancelled else "failed",
+                                stage="Cancelled" if cancelled else "Failed", finished_at=time.time())
+                        log_line(molecule.name, str(error))
+                        raise
                     finally:
                         stop_process(process)
+                        drain_log(final=True)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.settings.pool_size) as executor:
                 futures = [executor.submit(calculate_one, i, molecule) for i, molecule in enumerate(molecules)]
@@ -737,8 +805,7 @@ class ReferenceCalculator:
                     for future in concurrent.futures.as_completed(futures):
                         result = future.result()
                         report.results.append(result)
-                        self._emit({"status": "running", "total": len(molecules), "completed": len(report.results),
-                                    "molecule": result.to_dict()})
+                        publish()
                 except BaseException:
                     stopped.set()
                     for future in futures:
@@ -764,7 +831,8 @@ class ReferenceCalculator:
             staged.write_text(rendered, encoding="utf-8")
             staged.replace(output)
         report.finished_at = time.time()
-        self._emit({"status": "complete", **report.to_dict()})
+        self._emit({"status": "complete", **report.to_dict(), "workers": workers,
+                    "total": len(workers), "completed": len(report.results)})
         return report
 
     @staticmethod
@@ -805,6 +873,7 @@ def compute_reference(
     progress: Callable[[dict[str, Any]], None] | None = None,
     # Compatibility names used by older API workers.
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    log_callback: Callable[[str], None] | None = None,
     threads: int | None = None,
     thread_pool_size: int | None = None,
     memory_pool_size: int | None = None,
@@ -834,7 +903,7 @@ def compute_reference(
         progress = progress_callback
     settings = CalculationSettings(method, basis, pool_size, memory_mb, task_threads,
                                    memory_pool_mb=memory_pool_mb, basis_family=basis_family, cbs_pair=cbs_pair)
-    return ReferenceCalculator(settings, progress=progress).calculate(
+    return ReferenceCalculator(settings, progress=progress, log_callback=log_callback).calculate(
         tgz_path, ref_path, output_path, cancel_event=cancel_event
     )
 

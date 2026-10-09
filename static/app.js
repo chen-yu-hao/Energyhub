@@ -6,7 +6,7 @@
   const form = $('taskForm');
   const motion = window.EnergyhubMotion || { refresh() {}, feedback() {}, reveal(element, visible) { element.hidden = !visible; } };
   const terminal = new Set(['completed', 'failed', 'cancelled']);
-  const state = { capabilities: null, config: null, jobs: [], total: 0, job: null, files: { tgz: null, ref: null }, reports: new Map(), reportErrors: new Map(), busy: false, connected: false, refreshing: false, initial: true, page: 'new', taskId: null, renderKey: '', historyLimit: 100, searchTimer: null, resourceEdited: new Set() };
+  const state = { capabilities: null, config: null, jobs: [], total: 0, job: null, files: { tgz: null, ref: null }, reports: new Map(), reportErrors: new Map(), busy: false, connected: false, refreshing: false, initial: true, page: 'new', taskId: null, renderKey: '', historyLimit: 100, searchTimer: null, resourceEdited: new Set(), logTasks: new Set(), logs: new Map() };
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const number = (value, digits = 10) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—';
   const integer = id => Number($(id).value);
@@ -221,6 +221,24 @@
     const detailLines = component => `<p>Hartree–Fock: <span class="mono">${number(component.hf_hartree, 12)} Eₕ</span><br>Correlation: <span class="mono">${number(component.correlation_hartree, 12)} Eₕ</span>${typeof component.perturbative_correction_hartree === 'number' ? `<br>Perturbative correction: <span class="mono">${number(component.perturbative_correction_hartree, 12)} Eₕ</span>` : ''}${typeof component.quadruples_bracket_hartree === 'number' ? `<br>[Q] intermediate: <span class="mono">${number(component.quadruples_bracket_hartree, 12)} Eₕ</span><br>The total energy uses the (Q) correction; [Q] is not added again.` : ''}</p>`;
     return `<details id="provenance-${index}"><summary class="detail-summary">${escape(molecule.name)} · ${escape(details.reference_type || 'reference')} · PySCF ${escape(details.pyscf_version || 'unknown')}</summary><div class="provenance-box">${detailLines(details)}${details.components ? Object.entries(details.components).map(([basis, component]) => `<h4 style="margin-top:14px">${escape(basis)}</h4>${detailLines(component)}`).join('') : ''}<details id="raw-${index}"><summary class="detail-summary">Full calculation details</summary><pre>${escape(JSON.stringify(details, null, 2))}</pre></details></div></details>`;
   }
+  function processTable(job) {
+    const workers = job.progress?.workers || [];
+    if (!workers.length) return `<p class="help">${terminal.has(job.state) ? 'Process details were not recorded for this older task.' : 'Process details will appear when structure workers start.'}</p>`;
+    return `<h3 class="section-title">Structure processes</h3><div class="table-wrap"><table><thead><tr><th>Structure</th><th>Status</th><th>PID</th><th>Stage / basis</th><th>Elapsed</th><th>Threads</th><th>Memory budget</th></tr></thead><tbody>${workers.map(worker => {
+      const ended = terminal.has(job.state) && !terminal.has(worker.state);
+      const status = ended ? job.state : worker.state;
+      const elapsed = worker.started_at ? duration((worker.finished_at || job.finished_at || Date.now() / 1000) - worker.started_at) : '—';
+      return `<tr><td>${escape(worker.name)}</td><td>${escape(statusLabel(status))}</td><td>${escape(worker.pid || '—')}</td><td>${escape(ended ? statusLabel(status) : worker.stage)}<br><span class="muted">${escape(worker.basis)}</span></td><td data-worker-start="${escape(worker.started_at || 0)}" data-worker-end="${escape(worker.finished_at || job.finished_at || 0)}">${escape(elapsed)}</td><td>${escape(worker.threads)}</td><td>${escape(worker.memory_mb)} MB</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+  }
+  function renderLog() {
+    const target = $('taskLog');
+    if (!target || !state.logTasks.has(state.taskId)) return;
+    const payload = state.logs.get(state.taskId);
+    target.hidden = false;
+    const empty = terminal.has(state.job?.state) ? 'No worker output was saved for this task. Older tasks ran with logging disabled; their iteration logs cannot be recovered.' : 'Waiting for worker output…';
+    target.innerHTML = `<h3 class="section-title">Worker log${payload?.truncated ? ' · last 200 lines' : ''}</h3><p class="help">${terminal.has(state.job?.state) ? 'Saved output' : 'Updates automatically while this task runs'}</p><pre class="reference-preview">${escape(payload?.text || empty)}</pre>`;
+  }
   function renderJob(force = false) {
     const job = state.job;
     if (!job || state.page !== 'task') return;
@@ -236,11 +254,18 @@
     const percent = job.state === 'completed' ? 100 : total ? Math.min(100, Math.floor(completed / total * 100)) : null;
     const explanation = job.state === 'queued' ? 'Waiting for available server resources.' : job.state === 'cancelling' ? 'Stopping the calculation and its worker processes…' : job.state === 'completed' ? 'All required structures converged. Your reference file is ready.' : job.state === 'cancelled' ? 'This task was stopped. No complete reference file was published.' : job.state === 'failed' ? 'The calculation could not complete. Details are shown below.' : total ? `${completed} of ${total} structures completed. Progress updates after each complete structure.` : 'Preparing input and starting the calculation…';
     const rows = report?.reference_rows || [];
-    $('jobContent').innerHTML = `<div class="panel-heading"><div><h2 id="jobTitle">${escape(title(job))}</h2><p class="job-subtitle">${escape(modelLabel(job))}</p></div>${badge(job.state)}</div><div class="job-metadata"><span>Created ${escape(datetime(job.created_at))}</span><span>Elapsed <span id="jobElapsed">—</span></span><span title="${escape(job.task_id)}">ID ${escape(job.task_id.slice(0, 8))}</span></div><div class="job-progress"><div class="progress-caption"><strong>${escape(statusLabel(job.state))}</strong><span>${percent === null ? (terminal.has(job.state) ? '—' : job.state === 'queued' ? 'Waiting' : 'Preparing') : `${percent}%`}</span></div><div class="progress-track${percent === null ? ' indeterminate' : ''}" role="progressbar" aria-label="Completed structures" aria-valuemin="0" aria-valuemax="100"${percent === null ? '' : ` aria-valuenow="${percent}"`}><span style="width:${percent === null ? 25 : percent}%"></span></div><p class="progress-detail">${escape(explanation)}</p></div>${job.error ? `<div class="notice error" role="alert">${escape(job.error)}</div>` : ''}<div class="allocation"><div class="allocation-summary"><span><strong>${job.pool_size}</strong> at a time</span><span><strong>${job.task_threads}</strong> threads each</span><span><strong>${Number(job.memory_mb || Math.floor(job.memory_pool_mb / job.pool_size)).toLocaleString()}</strong> MB each</span></div></div><div class="job-metadata">${job.archive_filename ? `<span>Archive: ${escape(job.archive_filename)}</span>` : ''}${job.reference_filename ? `<span>Reference: ${escape(job.reference_filename)}</span>` : ''}</div><div class="job-actions">${job.state === 'completed' ? `<a class="button button-primary" id="downloadReference" href="${API}/jobs/${encodeURIComponent(job.task_id)}/result" download>Download .ref ↓</a><a class="button button-soft" id="downloadReport" href="${API}/jobs/${encodeURIComponent(job.task_id)}/report?download=1" download>JSON report ↓</a><button class="button button-soft" id="downloadCSV" type="button"${molecules.length ? '' : ' disabled'}>Energies CSV ↓</button>` : !terminal.has(job.state) ? `<button class="button button-danger" id="cancelTask" type="button"${job.state === 'cancelling' ? ' disabled' : ''}>${job.state === 'cancelling' ? 'Stopping…' : 'Stop task'}</button>` : ''}<button class="button button-soft" id="reuseTask" type="button">Use these settings</button><button class="button button-soft" id="showTaskLog" type="button">View log</button></div>${molecules.length ? `<h3 class="section-title">Molecular energies <span class="muted">· hartree</span></h3>${molecularTable(molecules)}<h3 class="section-title">Calculation details</h3>${molecules.map(provenance).join('')}` : progress.molecule ? `<h3 class="section-title">Latest completed structure</h3>${molecularTable([progress.molecule])}` : ''}${rows.length ? `<h3 class="section-title">Reference values</h3><div class="table-wrap"><table><thead><tr><th scope="col">Weighted reaction</th><th scope="col" class="numeric">Reference</th><th scope="col">Unit</th><th scope="col" class="numeric">Ratio</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escape(row.pairs.map(pair => `${pair.coefficient} × ${pair.name}`).join(' + '))}</td><td class="numeric">${number(row.value, 8)}</td><td>${escape(row.unit || (row.ratio == null ? 'Hartree' : 'kcal/mol'))}</td><td class="numeric">${escape(row.ratio ?? '—')}</td></tr>`).join('')}</tbody></table></div>` : ''}${state.reportErrors.has(job.task_id) ? `<p class="notice error">${escape(state.reportErrors.get(job.task_id))} <button type="button" class="button button-soft" id="retryReport">Retry report</button></p>` : ''}<div id="taskLog" hidden></div>`;
+    $('jobContent').innerHTML = `<div class="panel-heading"><div><h2 id="jobTitle">${escape(title(job))}</h2><p class="job-subtitle">${escape(modelLabel(job))}</p></div>${badge(job.state)}</div><div class="job-metadata"><span>Created ${escape(datetime(job.created_at))}</span><span>Elapsed <span id="jobElapsed">—</span></span><span title="${escape(job.task_id)}">ID ${escape(job.task_id.slice(0, 8))}</span></div><div class="job-progress"><div class="progress-caption"><strong>${escape(statusLabel(job.state))}</strong><span>${percent === null ? (terminal.has(job.state) ? '—' : job.state === 'queued' ? 'Waiting' : 'Preparing') : `${percent}%`}</span></div><div class="progress-track${percent === null ? ' indeterminate' : ''}" role="progressbar" aria-label="Completed structures" aria-valuemin="0" aria-valuemax="100"${percent === null ? '' : ` aria-valuenow="${percent}"`}><span style="width:${percent === null ? 25 : percent}%"></span></div><p class="progress-detail">${escape(explanation)}</p></div>${processTable(job)}${job.error ? `<div class="notice error" role="alert">${escape(job.error)}</div>` : ''}<div class="allocation"><div class="allocation-summary"><span><strong>${job.pool_size}</strong> at a time</span><span><strong>${job.task_threads}</strong> threads each</span><span><strong>${Number(job.memory_mb || Math.floor(job.memory_pool_mb / job.pool_size)).toLocaleString()}</strong> MB each</span></div></div><div class="job-metadata">${job.archive_filename ? `<span>Archive: ${escape(job.archive_filename)}</span>` : ''}${job.reference_filename ? `<span>Reference: ${escape(job.reference_filename)}</span>` : ''}</div><div class="job-actions">${job.state === 'completed' ? `<a class="button button-primary" id="downloadReference" href="${API}/jobs/${encodeURIComponent(job.task_id)}/result" download>Download .ref ↓</a><a class="button button-soft" id="downloadReport" href="${API}/jobs/${encodeURIComponent(job.task_id)}/report?download=1" download>JSON report ↓</a><button class="button button-soft" id="downloadCSV" type="button"${molecules.length ? '' : ' disabled'}>Energies CSV ↓</button>` : !terminal.has(job.state) ? `<button class="button button-danger" id="cancelTask" type="button"${job.state === 'cancelling' ? ' disabled' : ''}>${job.state === 'cancelling' ? 'Stopping…' : 'Stop task'}</button>` : ''}<button class="button button-soft" id="reuseTask" type="button">Use these settings</button><button class="button button-soft" id="showTaskLog" type="button">View log</button></div>${molecules.length ? `<h3 class="section-title">Molecular energies <span class="muted">· hartree</span></h3>${molecularTable(molecules)}<h3 class="section-title">Calculation details</h3>${molecules.map(provenance).join('')}` : progress.molecule ? `<h3 class="section-title">Latest completed structure</h3>${molecularTable([progress.molecule])}` : ''}${rows.length ? `<h3 class="section-title">Reference values</h3><div class="table-wrap"><table><thead><tr><th scope="col">Weighted reaction</th><th scope="col" class="numeric">Reference</th><th scope="col">Unit</th><th scope="col" class="numeric">Ratio</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escape(row.pairs.map(pair => `${pair.coefficient} × ${pair.name}`).join(' + '))}</td><td class="numeric">${number(row.value, 8)}</td><td>${escape(row.unit || (row.ratio == null ? 'Hartree' : 'kcal/mol'))}</td><td class="numeric">${escape(row.ratio ?? '—')}</td></tr>`).join('')}</tbody></table></div>` : ''}${state.reportErrors.has(job.task_id) ? `<p class="notice error">${escape(state.reportErrors.get(job.task_id))} <button type="button" class="button button-soft" id="retryReport">Retry report</button></p>` : ''}<div id="taskLog" hidden></div>`;
+    renderLog();
     for (const id of opened) if ($(id)) $(id).open = true;
     updateElapsed();
   }
-  function updateElapsed() { if ($('jobElapsed') && state.job) $('jobElapsed').textContent = state.job.started_at ? duration((state.job.finished_at || Date.now() / 1000) - state.job.started_at) : 'Not started'; }
+  function updateElapsed() {
+    if ($('jobElapsed') && state.job) $('jobElapsed').textContent = state.job.started_at ? duration((state.job.finished_at || Date.now() / 1000) - state.job.started_at) : 'Not started';
+    document.querySelectorAll('[data-worker-start]').forEach(cell => {
+      const start = Number(cell.dataset.workerStart);
+      cell.textContent = start ? duration((Number(cell.dataset.workerEnd) || Date.now() / 1000) - start) : '—';
+    });
+  }
   async function loadReport(id) {
     if (state.reports.has(id)) return;
     try { const report = await request(`/jobs/${encodeURIComponent(id)}/report`); state.reports.set(id, report); state.reportErrors.delete(id); }
@@ -255,6 +280,7 @@
       if (state.taskId !== id) return;
       state.job = job;
       renderJob();
+      if (state.logTasks.has(id)) await showLog();
       if (job.state === 'completed' && !state.reports.has(id) && !state.reportErrors.has(id)) await loadReport(id);
     } catch (error) {
       if (state.taskId === id) $('jobContent').innerHTML = `<div class="empty-state"><h2 id="jobTitle">Task unavailable</h2><p>${escape(error.message)}</p><button class="button button-soft" type="button" id="retryTask">Try again</button></div>`;
@@ -369,14 +395,19 @@
   }
   async function showLog(button) {
     const id = state.taskId;
-    button.disabled = true;
+    if (!id) return;
+    state.logTasks.add(id);
+    if (button) button.disabled = true;
     try {
       const payload = await request(`/jobs/${encodeURIComponent(id)}/log?lines=200`);
-      if (state.taskId !== id) return;
-      $('taskLog').hidden = false;
-      $('taskLog').innerHTML = `<h3 class="section-title">Worker log${payload.truncated ? ' · last 200 lines' : ''}</h3><pre class="reference-preview">${escape(payload.text || 'No log output yet.')}</pre>`;
-    } catch (error) { toast(error.message); }
-    finally { button.disabled = false; }
+      state.logs.set(id, payload);
+      if (state.taskId === id) renderLog();
+    } catch (error) {
+      if (state.taskId === id && $('taskLog')) {
+        $('taskLog').hidden = false;
+        $('taskLog').textContent = `Could not load worker log: ${error.message}. Retrying automatically.`;
+      }
+    } finally { if (button) button.disabled = false; }
   }
   function syncSettings() {
     const config = state.config;
